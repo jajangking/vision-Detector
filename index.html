@@ -202,9 +202,18 @@
     var taggedObjects = [], matchObjCounter = 0; // Custom tagged objects
 
     function checkReady() {
-      if (initDone.coco && initDone.face) loadStatus.innerHTML = '<span class="done">Semua siap ✓</span>';
-      else if (initDone.coco) loadStatus.innerHTML = 'Loading face model...';
-      else if (initDone.face) loadStatus.innerHTML = 'Loading object model...';
+      if (initDone.coco && initDone.face) {
+        loadStatus.innerHTML = '<span class="done">Semua siap ✓</span>';
+        document.getElementById('statusText').textContent = 'Siap!';
+      } else if (initDone.coco) {
+        loadStatus.innerHTML = 'Loading face model...';
+      } else if (initDone.face) {
+        loadStatus.innerHTML = 'Loading object model...';
+      }
+      // Update overlay status text
+      if (cocoModel || faceLoaded) {
+        document.getElementById('statusText').textContent = 'Siap! Klik Mulai.';
+      }
     }
 
     function loadSaved() {
@@ -227,8 +236,13 @@
       try { localStorage.setItem('taggedObjects', JSON.stringify(taggedObjects)); } catch(e) {}
     }
 
-    log('Secure: ' + (window.isSecureContext ? 'YES' : 'NO'));
-    log('Hostname: ' + location.hostname);
+    // Model loading timeout - if models don't load within 30s, allow manual start
+    var loadTimeout = setTimeout(function() {
+      if (!cocoModel && !faceLoaded) {
+        log('Model loading timeout - allowing manual start', 'warn');
+        notify('Model lambat, coba klik Mulai', true);
+      }
+    }, 30000);
 
     // Load COCO-SSD
     try {
@@ -236,19 +250,19 @@
       var tfScript = document.createElement('script');
       tfScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js';
       tfScript.onload = function() {
-        log('TF.js ✓', 'ok');
+        log('TF.js loaded', 'ok');
         var cocoScript = document.createElement('script');
         cocoScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
         cocoScript.onload = function() {
-          log('coco-ssd script ✓', 'ok');
-          tf.ready().then(function() {
-            log('Loading COCO-SSD model...', 'ok');
-            return cocoSsd.load();
-          }).then(function(m) {
-            cocoModel = m; log('COCO-SSD model ✓', 'ok'); initDone.coco = true; checkReady();
-            // Test detection
-            if (cocoModel) log('COCO-SSD ready, classes: ' + (cocoModel.classes ? cocoModel.classes.length : '?'), 'ok');
-          }).catch(function(e) { log('COCO load err: '+e.message, 'err'); initDone.coco = true; checkReady(); });
+          log('coco-ssd script loaded', 'ok');
+          setTimeout(function() {
+            tf.ready().then(function() {
+              log('Loading COCO-SSD model...', 'ok');
+              return cocoSsd.load();
+            }).then(function(m) {
+              cocoModel = m; log('COCO-SSD model ready', 'ok'); initDone.coco = true; checkReady();
+            }).catch(function(e) { log('COCO load err: '+e.message, 'err'); initDone.coco = true; checkReady(); });
+          }, 100);
         };
         cocoScript.onerror = function() { log('COCO CDN fail', 'err'); initDone.coco = true; checkReady(); };
         document.head.appendChild(cocoScript);
@@ -257,21 +271,18 @@
       document.head.appendChild(tfScript);
     } catch(e) { log('COCO err: '+e.message, 'err'); initDone.coco = true; checkReady(); }
 
-    // Load face-api (with recognition model)
+    // Load face-api (basic detection only)
     try {
       log('Loading face-api...');
       var faceScript = document.createElement('script');
       faceScript.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.min.js';
       faceScript.onload = function() {
-        log('face-api ✓', 'ok');
+        log('face-api script loaded', 'ok');
         var URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
         faceapi.nets.tinyFaceDetector.loadFromUri(URL).then(function() {
-          log('tinyFaceDetector ✓', 'ok');
-          return faceapi.nets.faceRecognitionNet.loadFromUri(URL);
-        }).then(function() {
-          log('faceRecognition ✓', 'ok');
+          log('tinyFaceDetector ready', 'ok');
           faceLoaded = true; initDone.face = true; checkReady();
-        }).catch(function(e) { log('Face err: '+e.message, 'err'); initDone.face = true; checkReady(); });
+        }).catch(function(e) { log('Face model err: '+e.message, 'err'); initDone.face = true; checkReady(); });
       };
       faceScript.onerror = function() { log('face-api CDN fail', 'err'); initDone.face = true; checkReady(); };
       document.head.appendChild(faceScript);
@@ -676,7 +687,10 @@
 
     // Buttons
     document.getElementById('startBtn').onclick = async function() {
-      if (!cocoModel && !faceLoaded) { notify('Model belum siap, tunggu...', true); return; }
+      if (typeof loadTimeout !== 'undefined') clearTimeout(loadTimeout);
+      if (!cocoModel && !faceLoaded) {
+        log('Starting without models - they will load in background', 'warn');
+      }
       log('Starting - COCO: '+(cocoModel?'ready':'no')+' Face: '+(faceLoaded?'ready':'no'), 'ok');
       try {
         document.getElementById('statusText').textContent = 'Buka kamera...';
