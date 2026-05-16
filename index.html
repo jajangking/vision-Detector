@@ -2,11 +2,11 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=1.0, user-scalable=no">
   <title>AI Vision - All-in-One</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; }
+    body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; }
     .container { max-width: 800px; margin: 0 auto; padding: 15px; }
     h1 { text-align: center; padding: 15px 0; font-size: 1.3rem; background: linear-gradient(90deg, #00d4ff, #7b2cbf); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .load-status { text-align: center; padding: 8px; font-size: 0.8rem; color: #888; }
@@ -15,6 +15,7 @@
     .video-wrap { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
     video { width: 100%; height: auto; display: block; }
     canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+    canvas.tag-active { pointer-events: auto; cursor: crosshair; }
     .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); z-index: 10; flex-direction: column; gap: 10px; }
     .overlay.hidden { display: none; }
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #00d4ff; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -91,6 +92,7 @@
           <div class="stat"><div class="val" id="faceCount">0</div><div class="lbl">Wajah</div></div>
           <div class="stat"><div class="val" id="savedCount">0</div><div class="lbl">Dataset</div></div>
         </div>
+        <div id="recogStatus" style="text-align:center;padding:8px;font-size:0.85rem;color:#888;">Recognition: belum ada data</div>
         <div class="face-input" style="margin-top:10px;">
           <input type="text" id="personLabel" placeholder="Label nama wajah (opsional)">
           <div class="checkbox"><input type="checkbox" id="autoSave"><label>Auto-save wajah tiap 3 detik</label></div>
@@ -99,6 +101,7 @@
           <button class="btn btn-capture" id="captureBtn">Capture Wajah</button>
           <button class="btn btn-export" id="exportBtn">Export</button>
         </div>
+        <div class="checkbox" style="margin-top:8px;"><input type="checkbox" id="tagMode"><label>Mode: Tambah Benda (drag area di canvas)</label></div>
         <div class="list" id="detList"></div>
         <div class="joystick-area" id="joystickArea">
           <div class="joystick-base"><div class="joystick-stick" id="joystickStick"></div></div>
@@ -109,12 +112,16 @@
 
     <div id="facesMode" style="display:none;">
       <div class="stats">
-        <div class="stat"><div class="val" id="totalFaces">0</div><div class="lbl">Total</div></div>
+        <div class="stat"><div class="val" id="totalFaces">0</div><div class="lbl">Wajah</div></div>
         <div class="stat"><div class="val" id="totalPersons">0</div><div class="lbl">Orang</div></div>
+        <div class="stat"><div class="val" id="totalTagged">0</div><div class="lbl">Benda</div></div>
       </div>
       <div class="controls" style="margin-top:10px;">
         <button class="btn btn-stop" id="clearAll">Hapus Semua</button>
       </div>
+      <div style="margin-top:15px;"><h3 style="font-size:0.85rem;color:#00d4ff;margin-bottom:8px;">Benda Ditag</h3></div>
+      <div class="dataset-grid" id="taggedGrid"></div>
+      <div style="margin-top:15px;"><h3 style="font-size:0.85rem;color:#00d4ff;margin-bottom:8px;">Dataset Wajah</h3></div>
       <div class="dataset-grid" id="datasetGrid"></div>
     </div>
 
@@ -127,7 +134,7 @@
   <div class="notif" id="notif"></div>
 
   <script>
-    // UI handlers first
+    // UI handlers
     document.querySelectorAll('.mode-btn').forEach(function(t) {
       t.onclick = function() {
         document.querySelectorAll('.mode-btn').forEach(function(x){x.classList.remove('active');});
@@ -141,6 +148,12 @@
     document.getElementById('debugToggle').onclick = function() {
       var d = document.getElementById('debug');
       d.style.display = d.style.display === 'none' ? 'block' : 'none';
+    };
+
+    document.getElementById('tagMode').onchange = function() {
+      var canvas = document.getElementById('canvas');
+      if (this.checked) { canvas.classList.add('tag-active'); notify('Mode aktif: DRAG area benda (kunci, dll) di canvas'); }
+      else { canvas.classList.remove('tag-active'); notify('Mode tambah benda nonaktif'); }
     };
 
     function log(msg, cls) {
@@ -165,6 +178,7 @@
     var joystickX = 0, joystickY = 0;
     var initDone = {coco: false, face: false};
     var loadStatus = document.getElementById('loadStatus');
+    var taggedObjects = [], matchObjCounter = 0; // Custom tagged objects
 
     function checkReady() {
       if (initDone.coco && initDone.face) loadStatus.innerHTML = '<span class="done">Semua siap ✓</span>';
@@ -174,11 +188,22 @@
 
     function loadSaved() {
       try { var s = localStorage.getItem('faceDataset'); if (s) dataset = JSON.parse(s); } catch(e) {}
+      try { var s2 = localStorage.getItem('taggedObjects'); if (s2) taggedObjects = JSON.parse(s2); } catch(e) {}
+      loadCustomObjects();
       document.getElementById('savedCount').textContent = dataset.length;
+      var statusEl = document.getElementById('recogStatus');
+      if (statusEl) {
+        var hasDesc = dataset.filter(function(d){return d.descriptor;}).length;
+        statusEl.textContent = 'Wajah: '+hasDesc+' | Benda custom: '+customObjects.length;
+        statusEl.style.color = customObjects.length > 0 ? '#ff00ff' : '#888';
+      }
       renderDataset();
     }
     function saveSaved() {
       try { localStorage.setItem('faceDataset', JSON.stringify(dataset)); } catch(e) { notify('Storage penuh!', true); }
+    }
+    function saveTagged() {
+      try { localStorage.setItem('taggedObjects', JSON.stringify(taggedObjects)); } catch(e) {}
     }
 
     log('Secure: ' + (window.isSecureContext ? 'YES' : 'NO'));
@@ -194,10 +219,15 @@
         var cocoScript = document.createElement('script');
         cocoScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
         cocoScript.onload = function() {
-          log('coco-ssd ✓', 'ok');
-          tf.ready().then(function() { return cocoSsd.load(); }).then(function(m) {
-            cocoModel = m; log('COCO-SSD ✓', 'ok'); initDone.coco = true; checkReady();
-          }).catch(function(e) { log('COCO err: '+e.message, 'err'); initDone.coco = true; checkReady(); });
+          log('coco-ssd script ✓', 'ok');
+          tf.ready().then(function() {
+            log('Loading COCO-SSD model...', 'ok');
+            return cocoSsd.load();
+          }).then(function(m) {
+            cocoModel = m; log('COCO-SSD model ✓', 'ok'); initDone.coco = true; checkReady();
+            // Test detection
+            if (cocoModel) log('COCO-SSD ready, classes: ' + (cocoModel.classes ? cocoModel.classes.length : '?'), 'ok');
+          }).catch(function(e) { log('COCO load err: '+e.message, 'err'); initDone.coco = true; checkReady(); });
         };
         cocoScript.onerror = function() { log('COCO CDN fail', 'err'); initDone.coco = true; checkReady(); };
         document.head.appendChild(cocoScript);
@@ -206,7 +236,7 @@
       document.head.appendChild(tfScript);
     } catch(e) { log('COCO err: '+e.message, 'err'); initDone.coco = true; checkReady(); }
 
-    // Load face-api
+    // Load face-api (with recognition model)
     try {
       log('Loading face-api...');
       var faceScript = document.createElement('script');
@@ -216,12 +246,9 @@
         var URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
         faceapi.nets.tinyFaceDetector.loadFromUri(URL).then(function() {
           log('tinyFaceDetector ✓', 'ok');
-          return faceapi.nets.faceLandmark68Net.loadFromUri(URL);
+          return faceapi.nets.faceRecognitionNet.loadFromUri(URL);
         }).then(function() {
-          log('landmarks ✓', 'ok');
-          return faceapi.nets.faceExpressionNet.loadFromUri(URL);
-        }).then(function() {
-          log('expressions ✓', 'ok');
+          log('faceRecognition ✓', 'ok');
           faceLoaded = true; initDone.face = true; checkReady();
         }).catch(function(e) { log('Face err: '+e.message, 'err'); initDone.face = true; checkReady(); });
       };
@@ -229,10 +256,10 @@
       document.head.appendChild(faceScript);
     } catch(e) { log('Face err: '+e.message, 'err'); initDone.face = true; checkReady(); }
 
-    // Camera
+    // Camera - lower resolution for performance
     async function startCam() {
       var video = document.getElementById('video');
-      var s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      var s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 480 }, height: { ideal: 360 } }, audio: false });
       video.srcObject = s;
       return new Promise(function(resolve) {
         video.onloadedmetadata = function() {
@@ -243,9 +270,10 @@
       });
     }
 
-    // Detection loop - simple and reliable
+    // Detection loop - optimized
     var lastObjs = [], lastFaces = [];
     var detecting = false;
+    var uiUpdateCounter = 0;
 
     async function runDetection() {
       if (detecting || !running) return;
@@ -254,31 +282,15 @@
       if (video.readyState < 2) { detecting = false; return; }
 
       try {
-        var objPromise = cocoModel ? cocoModel.detect(video).catch(function(e){log('obj err:'+e.message,'err');return [];}) : Promise.resolve([]);
-        var facePromise = faceLoaded ? (async function() {
-          try {
-            var det = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.2}));
-            if (typeof det.withFaceLandmarks === 'function') {
-              var withLandmarks = await det.withFaceLandmarks();
-              if (typeof withLandmarks.withFaceExpressions === 'function') {
-                var expResult = withLandmarks.withFaceExpressions();
-                if (expResult && typeof expResult.then === 'function') return await expResult;
-                return expResult;
-              }
-              return withLandmarks;
-            }
-            return await det;
-          } catch(e) {
-            log('face err:'+e.message,'err');
-            return [];
-          }
-        })() : Promise.resolve([]);
+        var objPromise = cocoModel ? cocoModel.detect(video).then(function(r) {
+          if (r.length > 0) log('Objects: '+r.map(function(o){return o.class;}).join(', '), 'ok');
+          return r;
+        }).catch(function(e){log('obj err:'+e.message,'err');return [];}) : Promise.resolve([]);
+        var facePromise = faceLoaded ? (async function(){ try { return await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3})); } catch(e){ return []; } })() : Promise.resolve([]);
 
         var results = await Promise.all([objPromise, facePromise]);
         lastObjs = results[0];
         lastFaces = results[1];
-        if (lastObjs.length > 0) log('Objects: '+lastObjs.length, 'ok');
-        if (lastFaces.length > 0) log('Faces: '+lastFaces.length, 'ok');
       } catch(e) { log('Detect err: '+e.message, 'err'); }
       detecting = false;
     }
@@ -289,12 +301,9 @@
       var canvas = document.getElementById('canvas');
       var ctx = canvas.getContext('2d');
 
-      // Set canvas dimensions if not set yet
       if (video.videoWidth > 0 && canvas.width === 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        canvas.style.width = video.clientWidth + 'px';
-        canvas.style.height = video.clientHeight + 'px';
         log('Canvas init: '+canvas.width+'x'+canvas.height, 'ok');
       }
 
@@ -302,71 +311,123 @@
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // TEST: red box if no detections yet
-      if (lastObjs.length === 0 && lastFaces.length === 0) {
-        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 4;
-        ctx.strokeRect(30, 30, 80, 80);
-        ctx.fillStyle = '#ff0000'; ctx.font = '16px sans-serif';
-        ctx.fillText('Canvas OK - waiting for detections...', 40, 140);
+      // Test indicator: show COCO status
+      if (!cocoModel) {
+        ctx.fillStyle = '#ffcc00'; ctx.font = '14px sans-serif';
+        ctx.fillText('⏳ COCO-SSD loading...', 10, 20);
+      } else if (lastObjs.length === 0 && lastFaces.length === 0) {
+        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 2;
+        ctx.strokeRect(10, 10, 100, 30);
+        ctx.fillStyle = '#ff0000'; ctx.font = '12px sans-serif';
+        ctx.fillText('No objects yet', 15, 30);
+      }
+
+      // Scan for custom objects (color-based) - throttled to every 15 frames for performance
+      customScanCounter++;
+      if (customObjects.length > 0 && canvas.width > 0 && customScanCounter % 15 === 0) {
+        scanCustomObjects(canvas, video);
+      }
+
+      // Draw custom objects (color-based tracking)
+      for (var i = 0; i < lastCustomDetections.length; i++) {
+        var co = lastCustomDetections[i];
+        ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 3;
+        ctx.strokeRect(co.x, co.y, co.w, co.h);
+        var lbl = co.label + ' ' + (co.score*100).toFixed(0) + '%';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = '#ff00ff'; ctx.fillRect(co.x, co.y-18, ctx.measureText(lbl).width+8, 18);
+        ctx.fillStyle = '#fff'; ctx.fillText(lbl, co.x+4, co.y-4);
+      }
+
+      // Draw selection rectangle
+      if (selecting) {
+        var sx = Math.min(selStartX, selEndX), sy = Math.min(selStartY, selEndY);
+        var sw = Math.abs(selEndX - selStartX), sh = Math.abs(selEndY - selStartY);
+        ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(sx, sy, sw, sh);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(0,255,0,0.1)';
+        ctx.fillRect(sx, sy, sw, sh);
+        ctx.fillStyle = '#00ff00'; ctx.font = '12px sans-serif';
+        ctx.fillText('Drag untuk tag benda...', sx, sy - 5);
       }
 
       // Draw objects
       var COLORS = {person:'#ff4444',car:'#ffcc00',bicycle:'#ff8800',motorcycle:'#88ff00',bottle:'#ffaa00',cup:'#00ffaa',chair:'#00ff55',tv:'#00ff55',laptop:'#5500ff',cell_phone:'#ff0055'};
-      lastObjs.forEach(function(p) {
+      for (var i = 0; i < lastObjs.length; i++) {
+        var p = lastObjs[i];
         var x=p.bbox[0], y=p.bbox[1], w=p.bbox[2], h=p.bbox[3];
         var col = COLORS[p.class] || '#00d4ff';
-        ctx.strokeStyle = col; ctx.lineWidth = p.class==='person' ? 4 : 2;
+        var isTagged = lastTaggedMatches[i];
+        if (isTagged) { col = '#00ff88'; ctx.lineWidth = 4; }
+        else { ctx.lineWidth = p.class==='person' ? 4 : 2; }
+        ctx.strokeStyle = col;
         ctx.strokeRect(x, y, w, h);
-        var lbl = p.class + ' ' + (p.score*100).toFixed(0) + '%';
+        var lbl = isTagged ? isTagged : (p.class + ' ' + (p.score*100).toFixed(0) + '%');
         ctx.font = 'bold 14px sans-serif';
         ctx.fillStyle = col; ctx.fillRect(x, y-18, ctx.measureText(lbl).width+8, 18);
         ctx.fillStyle = '#000'; ctx.fillText(lbl, x+4, y-4);
-      });
+      }
 
       // Draw faces
       var currentLabel = document.getElementById('personLabel').value || '';
-      lastFaces.forEach(function(d, i) {
-        if (!d.detection) return;
-        var b = d.detection.box;
-        var exp = d.expressions || {};
-        var main = Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0];
-        var lbl = (currentLabel ? currentLabel : 'Face') + ' ' + (main?main[0]:'') + ' ' + (main?(main[1]*100).toFixed(0):'') + '%';
-        ctx.strokeStyle = currentLabel ? '#00ff88' : '#00d4ff'; ctx.lineWidth = 3;
+      var displayName = lastMatchedLabel || currentLabel;
+      for (var i = 0; i < lastFaces.length; i++) {
+        var d = lastFaces[i];
+        if (!d.box) continue;
+        var b = d.box;
+        var lbl = displayName ? displayName : 'Face';
+        var col = lastMatchedLabel ? '#00ff88' : (currentLabel ? '#00ff88' : '#00d4ff');
+        ctx.strokeStyle = col; ctx.lineWidth = 3;
         ctx.strokeRect(b.x, b.y, b.width, b.height);
         ctx.font = 'bold 14px sans-serif';
-        ctx.fillStyle = currentLabel ? '#00ff88' : '#00d4ff'; ctx.fillRect(b.x, b.y-18, ctx.measureText(lbl).width+8, 18);
+        ctx.fillStyle = col; ctx.fillRect(b.x, b.y-18, ctx.measureText(lbl).width+8, 18);
         ctx.fillStyle = '#000'; ctx.fillText(lbl, b.x+4, b.y-4);
-      });
-
-      // Update counts
-      document.getElementById('objCount').textContent = lastObjs.length;
-      document.getElementById('faceCount').textContent = lastFaces.length;
-
-      // Update list
-      var items = [];
-      lastObjs.forEach(function(p) { items.push({label:p.class, conf:p.score, type:'obj'}); });
-      lastFaces.forEach(function(d) { var exp=d.expressions||{}; var main=Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0]; items.push({label:(currentLabel||'Face')+' '+ (main?main[0]:''), conf:d.detection.score, type:'face'}); });
-      document.getElementById('detList').innerHTML = items.map(function(it) {
-        return '<div class="item"><span><span class="dot" style="background:'+(it.type==='face'?'#00d4ff':'#ff4444')+'"></span>'+it.label+'</span><span class="conf">'+(it.conf*100).toFixed(0)+'%</span></div>';
-      }).join('') || '';
-
-      // Joystick
-      var cw = canvas.width || 1, ch = canvas.height || 1;
-      var target = lastFaces.length > 0 ? {x:lastFaces[0].detection.box.x+lastFaces[0].detection.box.width/2, y:lastFaces[0].detection.box.y+lastFaces[0].detection.box.height/2} :
-                   lastObjs.filter(function(p){return p.class==='person';}).length > 0 ? {x:lastObjs[0].bbox[0]+lastObjs[0].bbox[2]/2, y:lastObjs[0].bbox[1]+lastObjs[0].bbox[3]/2} : null;
-      if (target) {
-        var tx = (target.x/cw - 0.5) * 2, ty = (target.y/ch - 0.5) * 2;
-        joystickX = joystickX * 0.7 + tx * 0.3;
-        joystickY = joystickY * 0.7 + ty * 0.3;
-        document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
-        document.getElementById('trackingDot').classList.add('active');
-        document.getElementById('trackingText').textContent = 'Tracking';
-      } else {
-        joystickX *= 0.8; joystickY *= 0.8;
-        document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
-        document.getElementById('trackingDot').classList.remove('active');
-        document.getElementById('trackingText').textContent = 'No target';
       }
+
+      // Update UI every 5 frames to reduce DOM thrashing
+      uiUpdateCounter++;
+      if (uiUpdateCounter % 5 === 0) {
+        document.getElementById('objCount').textContent = lastObjs.length;
+        document.getElementById('faceCount').textContent = lastFaces.length;
+
+        var items = [];
+        for (var i = 0; i < lastObjs.length; i++) {
+          var p = lastObjs[i];
+          var lbl = lastTaggedMatches[i] || p.class;
+          items.push('<div class="item"><span><span class="dot" style="background:'+(lastTaggedMatches[i]?'#00ff88':'#ff4444')+'"></span>'+lbl+'</span><span class="conf">'+(p.score*100).toFixed(0)+'%</span></div>');
+        }
+        for (var i = 0; i < lastCustomDetections.length; i++) {
+          var co = lastCustomDetections[i];
+          items.push('<div class="item"><span><span class="dot" style="background:#ff00ff"></span>'+co.label+'</span><span class="conf">'+(co.score*100).toFixed(0)+'%</span></div>');
+        }
+        for (var i = 0; i < lastFaces.length; i++) {
+          items.push('<div class="item"><span><span class="dot" style="background:#00d4ff"></span>'+(currentLabel||'Face')+'</span><span class="conf">'+(lastFaces[i].score*100).toFixed(0)+'%</span></div>');
+        }
+        document.getElementById('detList').innerHTML = items.join('') || '';
+
+        // Joystick
+        var cw = canvas.width || 1, ch = canvas.height || 1;
+        var target = lastFaces.length > 0 ? {x:lastFaces[0].box.x+lastFaces[0].box.width/2, y:lastFaces[0].box.y+lastFaces[0].box.height/2} :
+                     lastObjs.filter(function(p){return p.class==='person';}).length > 0 ? {x:lastObjs[0].bbox[0]+lastObjs[0].bbox[2]/2, y:lastObjs[0].bbox[1]+lastObjs[0].bbox[3]/2} : null;
+        if (target) {
+          var tx = (target.x/cw - 0.5) * 2, ty = (target.y/ch - 0.5) * 2;
+          joystickX = joystickX * 0.7 + tx * 0.3;
+          joystickY = joystickY * 0.7 + ty * 0.3;
+          document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
+          document.getElementById('trackingDot').classList.add('active');
+          document.getElementById('trackingText').textContent = 'Tracking';
+        } else {
+          joystickX *= 0.8; joystickY *= 0.8;
+          document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
+          document.getElementById('trackingDot').classList.remove('active');
+          document.getElementById('trackingText').textContent = 'No target';
+        }
+      }
+
+      // Object matching
+      matchTaggedObjects(lastObjs);
 
       // Auto-save
       if (document.getElementById('autoSave').checked && lastFaces.length > 0) {
@@ -374,50 +435,236 @@
         if (now - lastAutoSave >= 3000) { captureFace(lastFaces[0]); lastAutoSave = now; }
       }
 
+      // Face recognition matching (async, runs in background)
+      if (faceLoaded && dataset.length > 0) {
+        matchFaces();
+      }
+
       requestAnimationFrame(drawFrame);
     }
 
-    // Detection timer
+    // Detection timer - 500ms interval for better performance
     var detectTimerId = null;
     function detectTimer() {
       if (!running) return;
       runDetection();
-      detectTimerId = setTimeout(detectTimer, 200);
+      detectTimerId = setTimeout(detectTimer, 500);
     }
 
-    function captureFace(det) {
+    async function captureFace(det) {
       var video = document.getElementById('video');
-      var b = det.detection.box, pad = 20;
+      var b = det.box ? det.box : det.detection.box;
+      var pad = 20;
       var fc = document.createElement('canvas');
       fc.width = b.width+pad*2; fc.height = b.height+pad*2;
       fc.getContext('2d').drawImage(video, b.x-pad, b.y-pad, b.width+pad*2, b.height+pad*2, 0, 0, fc.width, fc.height);
-      var img = fc.toDataURL('image/jpeg', 0.8);
+      var img = fc.toDataURL('image/jpeg', 0.7);
       var label = document.getElementById('personLabel').value || 'Unknown_' + Date.now().toString().slice(-6);
-      var exp = det.expressions || {};
-      var main = Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0];
-      dataset.push({ id: Date.now().toString(), label, time: new Date().toISOString(), conf: det.detection.score, exp: main?main[0]:'?', image: img });
+      // Extract face descriptor for recognition
+      var descriptor = null;
+      try {
+        var detResult = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3})).withFaceDescriptor();
+        if (detResult && detResult.descriptor) {
+          descriptor = Array.from(detResult.descriptor);
+        }
+      } catch(e) { log('Descriptor err: '+e.message, 'err'); }
+      dataset.push({ id: Date.now().toString(), label, time: new Date().toISOString(), conf: det.score || det.detection.score, exp: '?', image: img, descriptor: descriptor });
       saveSaved(); document.getElementById('savedCount').textContent = dataset.length;
       notify('Wajah "'+label+'" disimpan!'); renderDataset();
+    }
+
+    function euclideanDistance(a, b) {
+      var sum = 0;
+      for (var i = 0; i < a.length; i++) {
+        var diff = a[i] - b[i];
+        sum += diff * diff;
+      }
+      return Math.sqrt(sum);
+    }
+
+    var lastMatchedLabel = '', matchCounter = 0;
+
+    async function matchFaces() {
+      if (!faceLoaded || dataset.length === 0) { lastMatchedLabel = ''; return; }
+      matchCounter++;
+      if (matchCounter % 10 !== 0) return;
+      try {
+        var detResult = await faceapi.detectSingleFace(document.getElementById('video'), new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3})).withFaceDescriptor();
+        if (!detResult || !detResult.descriptor) { lastMatchedLabel = ''; return; }
+        var currentDesc = detResult.descriptor;
+        var bestMatch = null, bestDist = 0.6;
+        for (var i = 0; i < dataset.length; i++) {
+          var d = dataset[i];
+          if (!d.descriptor || d.descriptor.length !== 128) continue;
+          var refDesc = new Float32Array(d.descriptor);
+          var dist = euclideanDistance(currentDesc, refDesc);
+          if (dist < bestDist) { bestDist = dist; bestMatch = d.label; }
+        }
+        lastMatchedLabel = bestMatch || '';
+        var statusEl = document.getElementById('recogStatus');
+        if (statusEl) {
+          statusEl.textContent = bestMatch ? '✓ Recognized: ' + bestMatch : '✗ Unknown face';
+          statusEl.style.color = bestMatch ? '#00ff88' : '#ff4444';
+        }
+      } catch(e) { lastMatchedLabel = ''; }
+    }
+
+    // Object tagging & matching - color-based tracking for custom objects
+    var customObjects = [], lastCustomDetections = [];
+    var customScanCounter = 0;
+
+    function saveCustomObjects() {
+      try { localStorage.setItem('customObjects', JSON.stringify(customObjects)); } catch(e) {}
+    }
+    function loadCustomObjects() {
+      try { var s = localStorage.getItem('customObjects'); if (s) customObjects = JSON.parse(s); } catch(e) {}
+    }
+
+    // Extract average color from canvas region
+    function extractAvgColor(canvas, x, y, w, h) {
+      var ctx = canvas.getContext('2d');
+      var imgData = ctx.getImageData(x, y, w, h);
+      var data = imgData.data;
+      var r = 0, g = 0, b = 0, count = 0;
+      for (var i = 0; i < data.length; i += 16) { // sample every 4th pixel for speed
+        r += data[i]; g += data[i+1]; b += data[i+2]; count++;
+      }
+      return { r: r/count, g: g/count, b: b/count };
+    }
+
+    function colorDistance(c1, c2) {
+      var dr = c1.r - c2.r, dg = c1.g - c2.g, db = c1.b - c2.b;
+      return Math.sqrt(dr*dr + dg*dg + db*db);
+    }
+
+    // Scan frame for custom objects
+    function scanCustomObjects(canvas, video) {
+      lastCustomDetections = [];
+      if (customObjects.length === 0) return;
+      var ctx = canvas.getContext('2d');
+      var cw = canvas.width, ch = canvas.height;
+
+      for (var c = 0; c < customObjects.length; c++) {
+        var obj = customObjects[c];
+        if (!obj.avgColor) continue;
+        var scanStep = 30;
+        var regionW = Math.floor(obj.w * 1.5);
+        var regionH = Math.floor(obj.h * 1.5);
+        var bestDist = Infinity, bestX = 0, bestY = 0;
+
+        for (var y = 0; y < ch - regionH; y += scanStep) {
+          for (var x = 0; x < cw - regionW; x += scanStep) {
+            var avg = extractAvgColor(canvas, x, y, regionW, regionH);
+            var dist = colorDistance(obj.avgColor, avg);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestX = x;
+              bestY = y;
+            }
+          }
+        }
+
+        // Max possible distance is ~441 (sqrt(255^2 * 3))
+        var score = 1 - (bestDist / 441);
+        if (score > 0.5) {
+          lastCustomDetections.push({
+            label: obj.label,
+            x: bestX, y: bestY,
+            w: regionW, h: regionH,
+            score: score
+          });
+        }
+      }
+    }
+
+    // Draw selection rectangle on canvas
+    var selecting = false, selStartX = 0, selStartY = 0, selEndX = 0, selEndY = 0;
+
+    function startSelection(e) {
+      selecting = true;
+      var canvas = document.getElementById('canvas');
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvas.width / rect.width;
+      var scaleY = canvas.height / rect.height;
+      selStartX = (e.clientX - rect.left) * scaleX;
+      selStartY = (e.clientY - rect.top) * scaleY;
+      selEndX = selStartX;
+      selEndY = selStartY;
+    }
+
+    function moveSelection(e) {
+      if (!selecting) return;
+      var canvas = document.getElementById('canvas');
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvas.width / rect.width;
+      var scaleY = canvas.height / rect.height;
+      selEndX = (e.clientX - rect.left) * scaleX;
+      selEndY = (e.clientY - rect.top) * scaleY;
+    }
+
+    function endSelection(e) {
+      if (!selecting) return;
+      selecting = false;
+      var x = Math.min(selStartX, selEndX);
+      var y = Math.min(selStartY, selEndY);
+      var w = Math.abs(selEndX - selStartX);
+      var h = Math.abs(selEndY - selStartY);
+      if (w < 20 || h < 20) return;
+
+      var label = prompt('Beri nama untuk benda ini:');
+      if (!label) return;
+
+      var canvas = document.getElementById('canvas');
+      var avgColor = extractAvgColor(canvas, x, y, w, h);
+      customObjects.push({
+        id: Date.now().toString(),
+        label: label,
+        x: x, y: y, w: w, h: h,
+        avgColor: avgColor
+      });
+      saveCustomObjects();
+      notify('Benda "'+label+'" ditag! Sistem akan track berdasarkan warna.');
+      renderDataset();
+    }
+
+    function tagObjectAtPosition(clickX, clickY) {
+      // Legacy - now uses selection instead
+      notify('Mode tag: drag untuk seleksi area benda', true);
     }
 
     function renderDataset() {
       document.getElementById('totalFaces').textContent = dataset.length;
       document.getElementById('totalPersons').textContent = new Set(dataset.map(function(d){return d.label;})).size;
+      document.getElementById('totalTagged').textContent = customObjects.length;
+      // Render custom objects
+      var cGrid = document.getElementById('taggedGrid');
+      if (customObjects.length === 0) { cGrid.innerHTML = '<p style="color:#666;text-align:center;padding:15px;">Belum ada benda custom. Aktifkan mode dan drag area benda.</p>'; }
+      else {
+        cGrid.innerHTML = customObjects.map(function(o) {
+          var clr = o.avgColor ? 'rgb('+Math.round(o.avgColor.r)+','+Math.round(o.avgColor.g)+','+Math.round(o.avgColor.b)+')' : '#333';
+          return '<div class="face-card"><div style="width:100%;aspect-ratio:1;background:'+clr+';display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:#fff;font-weight:bold;">'+o.label.charAt(0).toUpperCase()+'</div><div class="info"><h4>'+o.label+'</h4><p>Color: '+clr+'</p></div><div class="actions"><button class="del-btn" onclick="delCustom(\''+o.id+'\')">X</button></div></div>';
+        }).join('');
+      }
+      // Render faces
       var grid = document.getElementById('datasetGrid');
-      if (dataset.length === 0) { grid.innerHTML = '<p style="color:#666;text-align:center;padding:30px;">Belum ada data</p>'; return; }
+      if (dataset.length === 0) { grid.innerHTML = '<p style="color:#666;text-align:center;padding:30px;">Belum ada data. Capture wajah dengan label nama untuk training recognition.</p>'; return; }
       grid.innerHTML = dataset.map(function(f) {
-        return '<div class="face-card"><img src="'+f.image+'" alt="'+f.label+'"><div class="info"><h4>'+f.label+'</h4><p>'+f.exp+' '+(f.conf*100).toFixed(0)+'%</p></div><div class="actions"><button class="dl-btn" onclick="dlFace(\''+f.id+'\')">DL</button><button class="del-btn" onclick="delFace(\''+f.id+'\')">X</button></div></div>';
+        var hasDesc = f.descriptor ? '✓' : '✗';
+        return '<div class="face-card"><img src="'+f.image+'" alt="'+f.label+'"><div class="info"><h4>'+f.label+' <span style="color:'+(f.descriptor?'#00ff88':'#ff4444')+'">['+hasDesc+']</span></h4><p>'+f.exp+' '+(f.conf*100).toFixed(0)+'%</p></div><div class="actions"><button class="dl-btn" onclick="dlFace(\''+f.id+'\')">DL</button><button class="del-btn" onclick="delFace(\''+f.id+'\')">X</button></div></div>';
       }).join('');
     }
     window.dlFace = function(id) { var f=dataset.find(function(d){return d.id===id;}); if(!f)return; var a=document.createElement('a'); a.download='face_'+f.label+'.jpg'; a.href=f.image; a.click(); };
     window.delFace = function(id) { dataset=dataset.filter(function(d){return d.id!==id;}); saveSaved(); document.getElementById('savedCount').textContent=dataset.length; renderDataset(); notify('Dihapus'); };
+    window.delTagged = function(id) { taggedObjects=taggedObjects.filter(function(d){return d.id!==id;}); saveTagged(); renderDataset(); notify('Benda dihapus'); };
+    window.delCustom = function(id) { customObjects=customObjects.filter(function(d){return d.id!==id;}); saveCustomObjects(); renderDataset(); notify('Benda custom dihapus'); };
 
     // Buttons
     document.getElementById('startBtn').onclick = async function() {
       if (!cocoModel && !faceLoaded) { notify('Model belum siap, tunggu...', true); return; }
+      log('Starting - COCO: '+(cocoModel?'ready':'no')+' Face: '+(faceLoaded?'ready':'no'), 'ok');
       try {
         document.getElementById('statusText').textContent = 'Buka kamera...';
-        stream = await startCam(); running = true;
+        stream = await startCam(); running = true; uiUpdateCounter = 0; matchCounter = 0; customScanCounter = 0;
         document.getElementById('overlay').classList.add('hidden');
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
@@ -437,7 +684,8 @@
       document.getElementById('objCount').textContent = '0';
       document.getElementById('faceCount').textContent = '0';
       document.getElementById('detList').innerHTML = '';
-      lastObjs = []; lastFaces = [];
+      lastObjs = []; lastFaces = []; lastCustomDetections = [];
+      customScanCounter = 0;
       joystickX=0; joystickY=0;
       document.getElementById('joystickStick').style.transform = 'translate(-50%, -50%)';
       document.getElementById('trackingDot').classList.remove('active');
@@ -449,7 +697,7 @@
       facing = facing === 'user' ? 'environment' : 'user';
       running = false; if(detectTimerId) clearTimeout(detectTimerId);
       if(stream) stream.getTracks().forEach(function(t){t.stop();});
-      stream = await startCam(); running = true;
+      stream = await startCam(); running = true; uiUpdateCounter = 0;
       drawFrame();
       detectTimer();
     };
@@ -457,20 +705,13 @@
     document.getElementById('captureBtn').onclick = async function() {
       if (!faceLoaded) { notify('Model wajah belum siap', true); return; }
       try {
-        var det = faceapi.detectAllFaces(document.getElementById('video'), new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.2}));
-        var faces;
-        if (typeof det.withFaceLandmarks === 'function') {
-          var withLandmarks = det.withFaceLandmarks();
-          if (typeof withLandmarks.withFaceExpressions === 'function') {
-            faces = await withLandmarks.withFaceExpressions();
-          } else {
-            faces = await withLandmarks;
-          }
+        var faces = await faceapi.detectAllFaces(document.getElementById('video'), new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3}));
+        if (faces.length > 0) {
+          await captureFace(faces[0]);
         } else {
-          faces = await det;
+          notify('Tidak ada wajah!', true);
         }
-        if (faces.length > 0) captureFace(faces[0]); else notify('Tidak ada wajah!', true);
-      } catch(e) { notify('Error: '+e.message, true); }
+      } catch(e) { notify('Error: '+e.message, true); log('Capture err: '+e.message, 'err'); }
     };
 
     document.getElementById('exportBtn').onclick = function() {
@@ -480,7 +721,39 @@
       notify('Exported '+dataset.length+' wajah');
     };
 
-    document.getElementById('clearAll').onclick = function() { if(confirm('Hapus semua?')){ dataset=[]; saveSaved(); document.getElementById('savedCount').textContent='0'; renderDataset(); notify('Dihapus'); } };
+    document.getElementById('clearAll').onclick = function() { if(confirm('Hapus semua?')){ dataset=[]; taggedObjects=[]; customObjects=[]; saveSaved(); saveTagged(); saveCustomObjects(); document.getElementById('savedCount').textContent='0'; renderDataset(); notify('Dihapus'); } };
+
+    // Canvas events for custom object selection
+    var canvasEl = document.getElementById('canvas');
+    canvasEl.onmousedown = function(e) {
+      if (!canvasEl.classList.contains('tag-active')) return;
+      startSelection(e);
+    };
+    canvasEl.onmousemove = function(e) {
+      if (!selecting) return;
+      moveSelection(e);
+    };
+    canvasEl.onmouseup = function(e) {
+      if (!selecting) return;
+      endSelection(e);
+    };
+    canvasEl.ontouchstart = function(e) {
+      if (!canvasEl.classList.contains('tag-active')) return;
+      e.preventDefault();
+      var touch = e.touches[0];
+      startSelection({clientX: touch.clientX, clientY: touch.clientY});
+    };
+    canvasEl.ontouchmove = function(e) {
+      if (!selecting) return;
+      e.preventDefault();
+      var touch = e.touches[0];
+      moveSelection({clientX: touch.clientX, clientY: touch.clientY});
+    };
+    canvasEl.ontouchend = function(e) {
+      if (!selecting) return;
+      e.preventDefault();
+      endSelection(e);
+    };
 
     loadSaved();
   </script>
