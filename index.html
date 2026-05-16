@@ -152,6 +152,8 @@
   </div>
 
   <script>
+    // Wrap everything in try-catch to prevent silent failures
+    try {
     // UI handlers
     document.querySelectorAll('.mode-btn').forEach(function(t) {
       t.onclick = function() {
@@ -168,17 +170,9 @@
       d.style.display = d.style.display === 'none' ? 'block' : 'none';
     };
 
-    document.getElementById('tagMode').onchange = function() {
-      var canvas = document.getElementById('canvas');
-      if (this.checked) { canvas.classList.add('tag-active'); notify('Mode aktif: DRAG area benda (kunci, dll) di canvas'); }
-      else { canvas.classList.remove('tag-active'); notify('Mode tambah benda nonaktif'); }
-    };
-
-    // Remove tagMode checkbox since we use modal now
-    document.getElementById('tagMode').parentElement.style.display = 'none';
-
     function log(msg, cls) {
       var dbg = document.getElementById('debug');
+      if (!dbg) return;
       var d = document.createElement('div');
       d.className = cls || '';
       d.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
@@ -187,6 +181,7 @@
 
     function notify(msg, err) {
       var n = document.getElementById('notif');
+      if (!n) { alert(msg); return; }
       n.textContent = msg; n.className = 'notif show' + (err ? ' err' : '');
       setTimeout(function() { n.classList.remove('show'); }, 3000);
     }
@@ -853,6 +848,11 @@
     };
 
     loadSaved();
+    log('App initialized successfully', 'ok');
+    } catch(e) {
+      console.error('Fatal error:', e);
+      alert('Error: ' + e.message);
+    }
   </script>
 </body>
 </html>
