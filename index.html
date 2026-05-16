@@ -420,12 +420,9 @@
         var p = lastObjs[i];
         var x=p.bbox[0], y=p.bbox[1], w=p.bbox[2], h=p.bbox[3];
         var col = COLORS[p.class] || '#00d4ff';
-        var isTagged = lastTaggedMatches[i];
-        if (isTagged) { col = '#00ff88'; ctx.lineWidth = 4; }
-        else { ctx.lineWidth = p.class==='person' ? 4 : 2; }
-        ctx.strokeStyle = col;
+        ctx.strokeStyle = col; ctx.lineWidth = p.class==='person' ? 4 : 2;
         ctx.strokeRect(x, y, w, h);
-        var lbl = isTagged ? isTagged : (p.class + ' ' + (p.score*100).toFixed(0) + '%');
+        var lbl = p.class + ' ' + (p.score*100).toFixed(0) + '%';
         ctx.font = 'bold 14px sans-serif';
         ctx.fillStyle = col; ctx.fillRect(x, y-18, ctx.measureText(lbl).width+8, 18);
         ctx.fillStyle = '#000'; ctx.fillText(lbl, x+4, y-4);
@@ -456,8 +453,7 @@
         var items = [];
         for (var i = 0; i < lastObjs.length; i++) {
           var p = lastObjs[i];
-          var lbl = lastTaggedMatches[i] || p.class;
-          items.push('<div class="item"><span><span class="dot" style="background:'+(lastTaggedMatches[i]?'#00ff88':'#ff4444')+'"></span>'+lbl+'</span><span class="conf">'+(p.score*100).toFixed(0)+'%</span></div>');
+          items.push('<div class="item"><span><span class="dot" style="background:#ff4444"></span>'+p.class+'</span><span class="conf">'+(p.score*100).toFixed(0)+'%</span></div>');
         }
         for (var i = 0; i < lastCustomDetections.length; i++) {
           var co = lastCustomDetections[i];
@@ -486,9 +482,6 @@
           document.getElementById('trackingText').textContent = 'No target';
         }
       }
-
-      // Object matching
-      matchTaggedObjects(lastObjs);
 
       // Auto-save
       if (document.getElementById('autoSave').checked && lastFaces.length > 0) {
