@@ -212,13 +212,15 @@
     }
 
     function loadSaved() {
-      try { var s = localStorage.getItem('faceDataset'); if (s) dataset = JSON.parse(s); } catch(e) {}
-      try { var s2 = localStorage.getItem('taggedObjects'); if (s2) taggedObjects = JSON.parse(s2); } catch(e) {}
+      try { var s = localStorage.getItem('faceDataset'); if (s) { var parsed = JSON.parse(s); if (Array.isArray(parsed)) dataset = parsed; } } catch(e) { dataset = []; }
+      try { var s2 = localStorage.getItem('taggedObjects'); if (s2) { var parsed2 = JSON.parse(s2); if (Array.isArray(parsed2)) taggedObjects = parsed2; } } catch(e) { taggedObjects = []; }
       loadCustomObjects();
+      if (!Array.isArray(dataset)) dataset = [];
+      if (!Array.isArray(customObjects)) customObjects = [];
       document.getElementById('savedCount').textContent = dataset.length;
       var statusEl = document.getElementById('recogStatus');
       if (statusEl) {
-        var hasDesc = dataset.filter(function(d){return d.descriptor;}).length;
+        var hasDesc = dataset.filter(function(d){return d && d.descriptor;}).length;
         statusEl.textContent = 'Wajah: '+hasDesc+' | Benda custom: '+customObjects.length;
         statusEl.style.color = customObjects.length > 0 ? '#ff00ff' : '#888';
       }
@@ -544,7 +546,8 @@
       try { localStorage.setItem('customObjects', JSON.stringify(customObjects)); } catch(e) {}
     }
     function loadCustomObjects() {
-      try { var s = localStorage.getItem('customObjects'); if (s) customObjects = JSON.parse(s); } catch(e) {}
+      try { var s = localStorage.getItem('customObjects'); if (s) { var parsed = JSON.parse(s); if (Array.isArray(parsed)) customObjects = parsed; } } catch(e) { customObjects = []; }
+      if (!Array.isArray(customObjects)) customObjects = [];
     }
 
     // Extract feature descriptor from image data
@@ -664,7 +667,8 @@
       else {
         cGrid.innerHTML = customObjects.map(function(o) {
           var thumb = o.photos && o.photos[0] ? '<img src="'+o.photos[0]+'" style="width:100%;aspect-ratio:1;object-fit:cover;">' : '<div style="width:100%;aspect-ratio:1;background:rgba(255,0,255,0.1);display:flex;align-items:center;justify-content:center;font-size:2rem;">📦</div>';
-          return '<div class="face-card">'+thumb+'<div class="info"><h4>'+o.label+'</h4><p>'+o.features.length+' referensi</p></div><div class="actions"><button class="del-btn" onclick="delCustom(\''+o.id+'\')">X</button></div></div>';
+          var featCount = o.features ? o.features.length : 0;
+          return '<div class="face-card">'+thumb+'<div class="info"><h4>'+o.label+'</h4><p>'+featCount+' referensi</p></div><div class="actions"><button class="del-btn" onclick="delCustom(\''+o.id+'\')">X</button></div></div>';
         }).join('');
       }
       // Render faces
