@@ -101,7 +101,9 @@
           <button class="btn btn-capture" id="captureBtn">Capture Wajah</button>
           <button class="btn btn-export" id="exportBtn">Export</button>
         </div>
-        <div class="checkbox" style="margin-top:8px;"><input type="checkbox" id="tagMode"><label>Mode: Tambah Benda (drag area di canvas)</label></div>
+        <div class="controls" style="margin-top:8px;">
+          <button class="btn btn-capture" id="regObjBtn" style="background:#ff00ff;color:#fff;">+ Register Benda Baru</button>
+        </div>
         <div class="list" id="detList"></div>
         <div class="joystick-area" id="joystickArea">
           <div class="joystick-base"><div class="joystick-stick" id="joystickStick"></div></div>
@@ -133,6 +135,22 @@
 
   <div class="notif" id="notif"></div>
 
+  <!-- Registration Modal -->
+  <div id="regModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:1000;display:none;align-items:center;justify-content:center;flex-direction:column;">
+    <div style="background:#1a1a2e;border-radius:16px;padding:20px;max-width:500px;width:90%;text-align:center;">
+      <h3 style="color:#ff00ff;margin-bottom:10px;">Register Benda Baru</h3>
+      <p style="color:#888;font-size:0.85rem;margin-bottom:15px;">Arahkan kamera ke benda, lalu ambil 3-5 foto dari berbagai sudut</p>
+      <input type="text" id="regObjLabel" placeholder="Nama benda (misal: Kunci Rumah)" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:#fff;margin-bottom:15px;font-size:1rem;text-align:center;">
+      <div id="regPreview" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:15px;min-height:60px;"></div>
+      <div style="display:flex;gap:8px;">
+        <button id="regCapture" style="flex:1;padding:12px;background:#ff00ff;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:1rem;">📸 Ambil Foto</button>
+        <button id="regSave" style="flex:1;padding:12px;background:#00ff88;color:#000;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:1rem;">✓ Simpan</button>
+      </div>
+      <button id="regCancel" style="margin-top:10px;padding:8px 20px;background:none;border:1px solid #666;color:#888;border-radius:6px;cursor:pointer;">Batal</button>
+      <p id="regInfo" style="color:#888;font-size:0.8rem;margin-top:10px;">Foto: 0/3 (min. 3)</p>
+    </div>
+  </div>
+
   <script>
     // UI handlers
     document.querySelectorAll('.mode-btn').forEach(function(t) {
@@ -155,6 +173,9 @@
       if (this.checked) { canvas.classList.add('tag-active'); notify('Mode aktif: DRAG area benda (kunci, dll) di canvas'); }
       else { canvas.classList.remove('tag-active'); notify('Mode tambah benda nonaktif'); }
     };
+
+    // Remove tagMode checkbox since we use modal now
+    document.getElementById('tagMode').parentElement.style.display = 'none';
 
     function log(msg, cls) {
       var dbg = document.getElementById('debug');
@@ -509,9 +530,9 @@
       } catch(e) { lastMatchedLabel = ''; }
     }
 
-    // Object tagging & matching - color-based tracking for custom objects
+    // Custom object registration & recognition
     var customObjects = [], lastCustomDetections = [];
-    var customScanCounter = 0;
+    var regPhotos = [], regMode = false;
 
     function saveCustomObjects() {
       try { localStorage.setItem('customObjects', JSON.stringify(customObjects)); } catch(e) {}
@@ -520,116 +541,111 @@
       try { var s = localStorage.getItem('customObjects'); if (s) customObjects = JSON.parse(s); } catch(e) {}
     }
 
-    // Extract average color from canvas region
-    function extractAvgColor(canvas, x, y, w, h) {
+    // Extract feature descriptor from image data
+    function extractFeatures(canvas, x, y, w, h) {
       var ctx = canvas.getContext('2d');
       var imgData = ctx.getImageData(x, y, w, h);
       var data = imgData.data;
-      var r = 0, g = 0, b = 0, count = 0;
-      for (var i = 0; i < data.length; i += 16) { // sample every 4th pixel for speed
-        r += data[i]; g += data[i+1]; b += data[i+2]; count++;
+      var gridSize = 4; // 4x4 grid
+      var cellW = Math.floor(w / gridSize), cellH = Math.floor(h / gridSize);
+      var features = [];
+
+      for (var gy = 0; gy < gridSize; gy++) {
+        for (var gx = 0; gx < gridSize; gx++) {
+          var cx = x + gx * cellW, cy = y + gy * cellH;
+          var cw = cellW, ch = cellH;
+          var r = 0, g = 0, b = 0, brightness = 0, count = 0;
+          var edgeSum = 0, edgeCount = 0;
+
+          for (var py = 0; py < ch; py += 2) {
+            for (var px = 0; px < cw; px += 2) {
+              var idx = ((cy + py) * w + (cx + px)) * 4;
+              if (idx + 3 >= data.length) continue;
+              r += data[idx]; g += data[idx+1]; b += data[idx+2];
+              brightness += (data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114);
+              count++;
+
+              // Simple edge detection (difference with right neighbor)
+              if (px + 2 < cw) {
+                var idx2 = idx + 8;
+                if (idx2 + 3 < data.length) {
+                  var diff = Math.abs(data[idx] - data[idx2]) + Math.abs(data[idx+1] - data[idx2+1]) + Math.abs(data[idx+2] - data[idx2+2]);
+                  edgeSum += diff;
+                  edgeCount++;
+                }
+              }
+            }
+          }
+
+          if (count > 0) {
+            features.push(r/count, g/count, b/count, brightness/count);
+          }
+          if (edgeCount > 0) {
+            features.push(edgeSum/edgeCount);
+          }
+        }
       }
-      return { r: r/count, g: g/count, b: b/count };
+      return features;
     }
 
-    function colorDistance(c1, c2) {
-      var dr = c1.r - c2.r, dg = c1.g - c2.g, db = c1.b - c2.b;
-      return Math.sqrt(dr*dr + dg*dg + db*db);
+    function featureDistance(f1, f2) {
+      if (f1.length !== f2.length) return Infinity;
+      var sum = 0;
+      for (var i = 0; i < f1.length; i++) {
+        var diff = f1[i] - f2[i];
+        sum += diff * diff;
+      }
+      return Math.sqrt(sum / f1.length);
     }
 
-    // Scan frame for custom objects
+    // Scan frame for custom objects using template matching
+    var customScanCounter = 0;
+
     function scanCustomObjects(canvas, video) {
       lastCustomDetections = [];
       if (customObjects.length === 0) return;
-      var ctx = canvas.getContext('2d');
       var cw = canvas.width, ch = canvas.height;
 
       for (var c = 0; c < customObjects.length; c++) {
         var obj = customObjects[c];
-        if (!obj.avgColor) continue;
-        var scanStep = 30;
-        var regionW = Math.floor(obj.w * 1.5);
-        var regionH = Math.floor(obj.h * 1.5);
-        var bestDist = Infinity, bestX = 0, bestY = 0;
+        if (!obj.features || obj.features.length === 0) continue;
 
-        for (var y = 0; y < ch - regionH; y += scanStep) {
-          for (var x = 0; x < cw - regionW; x += scanStep) {
-            var avg = extractAvgColor(canvas, x, y, regionW, regionH);
-            var dist = colorDistance(obj.avgColor, avg);
-            if (dist < bestDist) {
-              bestDist = dist;
+        var scanStep = 50;
+        var bestDist = Infinity, bestX = 0, bestY = 0;
+        var objW = Math.max(40, Math.floor(obj.avgW || 60));
+        var objH = Math.max(40, Math.floor(obj.avgH || 60));
+
+        for (var y = 0; y < ch - objH; y += scanStep) {
+          for (var x = 0; x < cw - objW; x += scanStep) {
+            var feat = extractFeatures(canvas, x, y, objW, objH);
+            if (feat.length === 0) continue;
+
+            // Compare against all reference features, take best match
+            var minDist = Infinity;
+            for (var f = 0; f < obj.features.length; f++) {
+              var d = featureDistance(feat, obj.features[f]);
+              if (d < minDist) minDist = d;
+            }
+
+            if (minDist < bestDist) {
+              bestDist = minDist;
               bestX = x;
               bestY = y;
             }
           }
         }
 
-        // Max possible distance is ~441 (sqrt(255^2 * 3))
-        var score = 1 - (bestDist / 441);
-        if (score > 0.5) {
+        // Threshold: lower is better (feature distance)
+        if (bestDist < 50) {
+          var score = 1 - (bestDist / 50);
           lastCustomDetections.push({
             label: obj.label,
             x: bestX, y: bestY,
-            w: regionW, h: regionH,
-            score: score
+            w: objW, h: objH,
+            score: Math.max(0, score)
           });
         }
       }
-    }
-
-    // Draw selection rectangle on canvas
-    var selecting = false, selStartX = 0, selStartY = 0, selEndX = 0, selEndY = 0;
-
-    function startSelection(e) {
-      selecting = true;
-      var canvas = document.getElementById('canvas');
-      var rect = canvas.getBoundingClientRect();
-      var scaleX = canvas.width / rect.width;
-      var scaleY = canvas.height / rect.height;
-      selStartX = (e.clientX - rect.left) * scaleX;
-      selStartY = (e.clientY - rect.top) * scaleY;
-      selEndX = selStartX;
-      selEndY = selStartY;
-    }
-
-    function moveSelection(e) {
-      if (!selecting) return;
-      var canvas = document.getElementById('canvas');
-      var rect = canvas.getBoundingClientRect();
-      var scaleX = canvas.width / rect.width;
-      var scaleY = canvas.height / rect.height;
-      selEndX = (e.clientX - rect.left) * scaleX;
-      selEndY = (e.clientY - rect.top) * scaleY;
-    }
-
-    function endSelection(e) {
-      if (!selecting) return;
-      selecting = false;
-      var x = Math.min(selStartX, selEndX);
-      var y = Math.min(selStartY, selEndY);
-      var w = Math.abs(selEndX - selStartX);
-      var h = Math.abs(selEndY - selStartY);
-      if (w < 20 || h < 20) return;
-
-      var label = prompt('Beri nama untuk benda ini:');
-      if (!label) return;
-
-      var canvas = document.getElementById('canvas');
-      var avgColor = extractAvgColor(canvas, x, y, w, h);
-      customObjects.push({
-        id: Date.now().toString(),
-        label: label,
-        x: x, y: y, w: w, h: h,
-        avgColor: avgColor
-      });
-      saveCustomObjects();
-      notify('Benda "'+label+'" ditag! Sistem akan track berdasarkan warna.');
-      renderDataset();
-    }
-
-    function tagObjectAtPosition(clickX, clickY) {
-      // Legacy - now uses selection instead
-      notify('Mode tag: drag untuk seleksi area benda', true);
     }
 
     function renderDataset() {
@@ -638,11 +654,11 @@
       document.getElementById('totalTagged').textContent = customObjects.length;
       // Render custom objects
       var cGrid = document.getElementById('taggedGrid');
-      if (customObjects.length === 0) { cGrid.innerHTML = '<p style="color:#666;text-align:center;padding:15px;">Belum ada benda custom. Aktifkan mode dan drag area benda.</p>'; }
+      if (customObjects.length === 0) { cGrid.innerHTML = '<p style="color:#666;text-align:center;padding:15px;">Belum ada benda custom. Klik "+ Register Benda Baru" untuk mulai.</p>'; }
       else {
         cGrid.innerHTML = customObjects.map(function(o) {
-          var clr = o.avgColor ? 'rgb('+Math.round(o.avgColor.r)+','+Math.round(o.avgColor.g)+','+Math.round(o.avgColor.b)+')' : '#333';
-          return '<div class="face-card"><div style="width:100%;aspect-ratio:1;background:'+clr+';display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:#fff;font-weight:bold;">'+o.label.charAt(0).toUpperCase()+'</div><div class="info"><h4>'+o.label+'</h4><p>Color: '+clr+'</p></div><div class="actions"><button class="del-btn" onclick="delCustom(\''+o.id+'\')">X</button></div></div>';
+          var thumb = o.photos && o.photos[0] ? '<img src="'+o.photos[0]+'" style="width:100%;aspect-ratio:1;object-fit:cover;">' : '<div style="width:100%;aspect-ratio:1;background:rgba(255,0,255,0.1);display:flex;align-items:center;justify-content:center;font-size:2rem;">📦</div>';
+          return '<div class="face-card">'+thumb+'<div class="info"><h4>'+o.label+'</h4><p>'+o.features.length+' referensi</p></div><div class="actions"><button class="del-btn" onclick="delCustom(\''+o.id+'\')">X</button></div></div>';
         }).join('');
       }
       // Render faces
@@ -723,36 +739,103 @@
 
     document.getElementById('clearAll').onclick = function() { if(confirm('Hapus semua?')){ dataset=[]; taggedObjects=[]; customObjects=[]; saveSaved(); saveTagged(); saveCustomObjects(); document.getElementById('savedCount').textContent='0'; renderDataset(); notify('Dihapus'); } };
 
-    // Canvas events for custom object selection
+    // Canvas events for custom object selection (legacy, kept for compatibility)
+    var selecting = false, selStartX = 0, selStartY = 0, selEndX = 0, selEndY = 0;
     var canvasEl = document.getElementById('canvas');
     canvasEl.onmousedown = function(e) {
-      if (!canvasEl.classList.contains('tag-active')) return;
-      startSelection(e);
+      selecting = true;
+      var rect = canvasEl.getBoundingClientRect();
+      var scaleX = canvasEl.width / rect.width;
+      var scaleY = canvasEl.height / rect.height;
+      selStartX = (e.clientX - rect.left) * scaleX;
+      selStartY = (e.clientY - rect.top) * scaleY;
+      selEndX = selStartX; selEndY = selStartY;
     };
     canvasEl.onmousemove = function(e) {
       if (!selecting) return;
-      moveSelection(e);
+      var rect = canvasEl.getBoundingClientRect();
+      var scaleX = canvasEl.width / rect.width;
+      var scaleY = canvasEl.height / rect.height;
+      selEndX = (e.clientX - rect.left) * scaleX;
+      selEndY = (e.clientY - rect.top) * scaleY;
     };
-    canvasEl.onmouseup = function(e) {
-      if (!selecting) return;
-      endSelection(e);
+    canvasEl.onmouseup = function(e) { selecting = false; };
+
+    // Registration modal handlers
+    var regPhotos = [], regMode = false;
+
+    document.getElementById('regObjBtn').onclick = function() {
+      if (!running) { notify('Nyalakan kamera dulu!', true); return; }
+      regPhotos = [];
+      document.getElementById('regObjLabel').value = '';
+      document.getElementById('regPreview').innerHTML = '';
+      document.getElementById('regInfo').textContent = 'Foto: 0/3 (min. 3)';
+      document.getElementById('regModal').style.display = 'flex';
+      regMode = true;
     };
-    canvasEl.ontouchstart = function(e) {
-      if (!canvasEl.classList.contains('tag-active')) return;
-      e.preventDefault();
-      var touch = e.touches[0];
-      startSelection({clientX: touch.clientX, clientY: touch.clientY});
+
+    document.getElementById('regCapture').onclick = function() {
+      if (!running) return;
+      var video = document.getElementById('video');
+      var fc = document.createElement('canvas');
+      fc.width = 120; fc.height = 120;
+      fc.getContext('2d').drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, 120, 120);
+      var imgData = fc.toDataURL('image/jpeg', 0.5);
+      regPhotos.push(imgData);
+
+      // Add preview thumbnail
+      var thumb = document.createElement('img');
+      thumb.src = imgData;
+      thumb.style.cssText = 'width:60px;height:60px;object-fit:cover;border-radius:6px;border:2px solid #ff00ff;';
+      document.getElementById('regPreview').appendChild(thumb);
+      document.getElementById('regInfo').textContent = 'Foto: '+regPhotos.length+'/3 (min. 3)';
+      notify('Foto '+regPhotos.length+' diambil!');
     };
-    canvasEl.ontouchmove = function(e) {
-      if (!selecting) return;
-      e.preventDefault();
-      var touch = e.touches[0];
-      moveSelection({clientX: touch.clientX, clientY: touch.clientY});
+
+    document.getElementById('regSave').onclick = function() {
+      var label = document.getElementById('regObjLabel').value.trim();
+      if (!label) { notify('Masukkan nama benda!', true); return; }
+      if (regPhotos.length < 3) { notify('Minimal 3 foto!', true); return; }
+
+      // Extract features from each photo
+      var features = [];
+      var totalW = 0, totalH = 0;
+      for (var i = 0; i < regPhotos.length; i++) {
+        (function(idx) {
+          var img = new Image();
+          img.onload = function() {
+            var tc = document.createElement('canvas');
+            tc.width = img.width; tc.height = img.height;
+            tc.getContext('2d').drawImage(img, 0, 0);
+            var feat = extractFeatures(tc, 0, 0, img.width, img.height);
+            features[idx] = feat;
+            totalW += img.width; totalH += img.height;
+
+            // When all photos processed
+            if (features.filter(function(f){return f && f.length > 0;}).length === regPhotos.length) {
+              customObjects.push({
+                id: Date.now().toString(),
+                label: label,
+                features: features.filter(function(f){return f && f.length > 0;}),
+                avgW: totalW / regPhotos.length,
+                avgH: totalH / regPhotos.length,
+                photos: regPhotos
+              });
+              saveCustomObjects();
+              document.getElementById('regModal').style.display = 'none';
+              regMode = false;
+              notify('Benda "'+label+'" terdaftar dengan '+regPhotos.length+' foto!');
+              renderDataset();
+            }
+          };
+          img.src = regPhotos[idx];
+        })(i);
+      }
     };
-    canvasEl.ontouchend = function(e) {
-      if (!selecting) return;
-      e.preventDefault();
-      endSelection(e);
+
+    document.getElementById('regCancel').onclick = function() {
+      document.getElementById('regModal').style.display = 'none';
+      regMode = false;
     };
 
     loadSaved();
