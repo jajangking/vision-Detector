@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Detection & Dataset Manager</title>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #fff;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+
+    header p {
+      color: #a0a0a0;
+      font-size: 0.9rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      justify-content: center;
+    }
+
+    .tab {
+      padding: 10px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+      border-color: transparent;
+    }
+
+    .tab:hover:not(.active) {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .main-content {
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      gap: 20px;
+    }
+
+    @media (max-width: 1000px) {
+      .main-content {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .video-container {
+      position: relative;
+      background: #0a0a0a;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      aspect-ratio: 16/9;
+    }
+
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    canvas {
+      z-index: 10;
+    }
+
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 20;
+      text-align: center;
+    }
+
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #00d4ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .card h3 {
+      font-size: 0.9rem;
+      color: #00d4ff;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ff4444;
+      display: inline-block;
+    }
+
+    .status-indicator.active {
+      background: #00ff88;
+      box-shadow: 0 0 10px #00ff88;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .stat-item {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 10px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #00d4ff;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      flex: 1;
+      min-width: 80px;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+      color: white;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #00ff88, #00cc66);
+      color: #000;
+    }
+
+    .btn-warning {
+      background: linear-gradient(135deg, #ffcc00, #ff8800);
+      color: #000;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ff4444, #cc0000);
+      color: white;
+    }
+
+    .btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .input-group {
+      margin-bottom: 10px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .input-group input, .input-group select {
+      width: 100%;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.85rem;
+    }
+
+    .input-group input:focus, .input-group select:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+
+    .checkbox-group label {
+      font-size: 0.85rem;
+      color: #ccc;
+    }
+
+    .fps-counter {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 15;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    .face-preview {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 15;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .face-preview img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 4px;
+      border: 2px solid #00d4ff;
+    }
+
+    .face-preview p {
+      font-size: 0.7rem;
+      text-align: center;
+      margin-top: 5px;
+      color: #00ff88;
+    }
+
+    /* Dataset Tab */
+    .dataset-view {
+      display: none;
+    }
+
+    .dataset-view.active {
+      display: block;
+    }
+
+    .dataset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .face-card {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: transform 0.2s;
+    }
+
+    .face-card:hover {
+      transform: translateY(-5px);
+    }
+
+    .face-card img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+    }
+
+    .face-card-info {
+      padding: 10px;
+    }
+
+    .face-card-info h4 {
+      font-size: 0.85rem;
+      margin-bottom: 5px;
+      color: #00d4ff;
+    }
+
+    .face-card-info p {
+      font-size: 0.7rem;
+      color: #888;
+    }
+
+    .face-card-actions {
+      display: flex;
+      gap: 5px;
+      margin-top: 8px;
+    }
+
+    .face-card-actions button {
+      flex: 1;
+      padding: 5px;
+      border: none;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .btn-download {
+      background: #00d4ff;
+      color: #000;
+    }
+
+    .btn-delete {
+      background: #ff4444;
+      color: #fff;
+    }
+
+    .dataset-stats {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .dataset-stat {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 15px 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .dataset-stat .value {
+      font-size: 1.8rem;
+      font-weight: bold;
+      color: #00d4ff;
+    }
+
+    .dataset-stat .label {
+      font-size: 0.8rem;
+      color: #888;
+    }
+
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .filter-bar input, .filter-bar select {
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.85rem;
+    }
+
+    .filter-bar input:focus, .filter-bar select:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+
+    .empty-state svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+      opacity: 0.3;
+    }
+
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 255, 136, 0.9);
+      color: #000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      z-index: 1000;
+      transform: translateX(400px);
+      transition: transform 0.3s;
+    }
+
+    .notification.show {
+      transform: translateX(0);
+    }
+
+    .notification.error {
+      background: rgba(255, 68, 68, 0.9);
+      color: #fff;
+    }
+
+    .detection-list {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .detection-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+    }
+
+    .detection-item .confidence {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #00d4ff;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Face Detection & Dataset Manager</h1>
+      <p>Deteksi wajah real-time dengan penyimpanan dataset otomatis</p>
+    </header>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="detection">Deteksi</div>
+      <div class="tab" data-tab="dataset">Dataset</div>
+    </div>
+
+    <div id="detectionTab" class="dataset-view active">
+      <div class="main-content">
+        <div class="video-container">
+          <video id="webcam" autoplay playsinline></video>
+          <canvas id="canvas"></canvas>
+          <div id="loading">
+            <div class="spinner"></div>
+            <p>Memuat model face detection...</p>
+          </div>
+          <div class="fps-counter" id="fpsCounter">FPS: --</div>
+          <div class="face-preview" id="facePreview">
+            <img id="facePreviewImg" src="" alt="Face">
+            <p>Face Saved!</p>
+          </div>
+        </div>
+
+        <div class="sidebar">
+          <div class="card">
+            <h3>
+              <span class="status-indicator" id="statusIndicator"></span>
+              Status Sistem
+            </h3>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <div class="stat-value" id="faceCount">0</div>
+                <div class="stat-label">Wajah Terdeteksi</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-value" id="savedCount">0</div>
+                <div class="stat-label">Disimpan</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Pengaturan Penyimpanan</h3>
+            <div class="input-group">
+              <label>Label/Nama Orang</label>
+              <input type="text" id="personLabel" placeholder="Contoh: John, Unknown_1">
+            </div>
+            <div class="input-group">
+              <label>Auto-save interval (ms)</label>
+              <input type="number" id="autoSaveInterval" value="3000" min="1000" max="60000" step="500">
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="autoSaveToggle">
+              <label for="autoSaveToggle">Auto-save wajah</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="saveExpression" checked>
+              <label for="saveExpression">Simpan ekspresi wajah</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="saveLandmarks" checked>
+              <label for="saveLandmarks">Simpan landmarks</label>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Kontrol</h3>
+            <div class="controls">
+              <button class="btn btn-primary" id="startBtn" disabled>Mulai</button>
+              <button class="btn btn-danger" id="stopBtn" disabled>Stop</button>
+            </div>
+            <div class="controls" style="margin-top: 10px;">
+              <button class="btn btn-success" id="captureBtn" disabled>Capture</button>
+              <button class="btn btn-warning" id="exportBtn">Export</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Wajah Terdeteksi</h3>
+            <div class="detection-list" id="detectionList">
+              <p style="color: #666; font-size: 0.8rem; text-align: center;">Belum ada wajah terdeteksi</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="datasetTab" class="dataset-view">
+      <div class="dataset-stats">
+        <div class="dataset-stat">
+          <div class="value" id="totalFaces">0</div>
+          <div class="label">Total Wajah</div>
+        </div>
+        <div class="dataset-stat">
+          <div class="value" id="totalPersons">0</div>
+          <div class="label">Jumlah Orang</div>
+        </div>
+        <div class="dataset-stat">
+          <div class="value" id="storageUsed">0 KB</div>
+          <div class="label">Storage</div>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <input type="text" id="searchInput" placeholder="Cari nama...">
+        <select id="sortSelect">
+          <option value="newest">Terbaru</option>
+          <option value="oldest">Terlama</option>
+          <option value="name">Nama A-Z</option>
+        </select>
+        <button class="btn btn-danger" id="clearAllBtn">Hapus Semua</button>
+      </div>
+
+      <div class="dataset-grid" id="datasetGrid">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+          </svg>
+          <p>Belum ada data wajah</p>
+          <p style="font-size: 0.8rem;">Mulai deteksi dan simpan wajah untuk membuat dataset</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notification" id="notification"></div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const loading = document.getElementById('loading');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const captureBtn = document.getElementById('captureBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const faceCount = document.getElementById('faceCount');
+    const savedCount = document.getElementById('savedCount');
+    const detectionList = document.getElementById('detectionList');
+    const fpsCounter = document.getElementById('fpsCounter');
+    const facePreview = document.getElementById('facePreview');
+    const facePreviewImg = document.getElementById('facePreviewImg');
+    const personLabel = document.getElementById('personLabel');
+    const autoSaveInterval = document.getElementById('autoSaveInterval');
+    const autoSaveToggle = document.getElementById('autoSaveToggle');
+    const saveExpression = document.getElementById('saveExpression');
+    const saveLandmarks = document.getElementById('saveLandmarks');
+    const notification = document.getElementById('notification');
+
+    const datasetGrid = document.getElementById('datasetGrid');
+    const totalFaces = document.getElementById('totalFaces');
+    const totalPersons = document.getElementById('totalPersons');
+    const storageUsed = document.getElementById('storageUsed');
+    const searchInput = document.getElementById('searchInput');
+    const sortSelect = document.getElementById('sortSelect');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+
+    let isRunning = false;
+    let animationId = null;
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fps = 0;
+    let savedFacesCount = 0;
+    let lastAutoSave = 0;
+    let stream = null;
+
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
+
+    let dataset = [];
+
+    function loadDataset() {
+      const saved = localStorage.getItem('faceDataset');
+      if (saved) {
+        dataset = JSON.parse(saved);
+        savedFacesCount = dataset.length;
+        savedCount.textContent = savedFacesCount;
+        updateDatasetView();
+      }
+    }
+
+    function saveDataset() {
+      try {
+        localStorage.setItem('faceDataset', JSON.stringify(dataset));
+      } catch (e) {
+        showNotification('Storage penuh! Export dan hapus data lama.', 'error');
+      }
+    }
+
+    function showNotification(message, type = 'success') {
+      notification.textContent = message;
+      notification.className = 'notification ' + type + ' show';
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, 3000);
+    }
+
+    async function loadModels() {
+      try {
+        loading.innerHTML = '<div class="spinner"></div><p>Loading face detection model...</p>';
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+
+        loading.innerHTML = '<p style="color: #00ff88;">Model siap!</p>';
+        startBtn.disabled = true;
+        captureBtn.disabled = false;
+
+        setTimeout(() => {
+          loading.style.display = 'none';
+          startBtn.disabled = false;
+        }, 1000);
+      } catch (error) {
+        loading.innerHTML = '<p style="color: #ff4444;">Gagal memuat model: ' + error.message + '</p>';
+      }
+    }
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            resolve();
+          };
+        });
+      } catch (error) {
+        alert('Gagal mengakses kamera: ' + error.message);
+        throw error;
+      }
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+        video.srcObject = null;
+      }
+    }
+
+    function drawDetections(detections) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      faceCount.textContent = detections.length;
+
+      detections.forEach((det, i) => {
+        const box = det.detection.box;
+        const x = box.x;
+        const y = box.y;
+        const w = box.width;
+        const h = box.height;
+
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
+
+        const expressions = det.expressions || {};
+        const mainExpression = Object.entries(expressions)
+          .sort((a, b) => b[1] - a[1])[0];
+
+        const label = mainExpression
+          ? `${mainExpression[0]} (${(mainExpression[1] * 100).toFixed(0)}%)`
+          : 'Unknown';
+
+        ctx.fillStyle = '#00d4ff';
+        ctx.fillRect(x, y - 25, w, 25);
+
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillText(`Face ${i + 1}: ${label}`, x + 5, y - 7);
+
+        if (saveLandmarks.checked && det.landmarks) {
+          const points = det.landmarks.positions;
+          ctx.fillStyle = '#ff4444';
+          points.forEach(point => {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      });
+
+      updateDetectionList(detections);
+    }
+
+    function updateDetectionList(detections) {
+      if (detections.length === 0) {
+        detectionList.innerHTML = '<p style="color: #666; font-size: 0.8rem; text-align: center;">Belum ada wajah terdeteksi</p>';
+        return;
+      }
+
+      detectionList.innerHTML = detections.map((det, i) => {
+        const expressions = det.expressions || {};
+        const mainExpression = Object.entries(expressions)
+          .sort((a, b) => b[1] - a[1])[0];
+        const confidence = (det.detection.score * 100).toFixed(1);
+
+        return `
+          <div class="detection-item">
+            <span>Face ${i + 1}: ${mainExpression ? mainExpression[0] : 'Unknown'}</span>
+            <span class="confidence">${confidence}%</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function captureFace(detection) {
+      const box = detection.detection.box;
+      const padding = 20;
+
+      const faceCanvas = document.createElement('canvas');
+      faceCanvas.width = box.width + padding * 2;
+      faceCanvas.height = box.height + padding * 2;
+
+      const faceCtx = faceCanvas.getContext('2d');
+      faceCtx.drawImage(
+        video,
+        box.x - padding,
+        box.y - padding,
+        box.width + padding * 2,
+        box.height + padding * 2,
+        0,
+        0,
+        faceCanvas.width,
+        faceCanvas.height
+      );
+
+      const imageData = faceCanvas.toDataURL('image/jpeg', 0.85);
+      const label = personLabel.value || `Unknown_${Date.now()}`;
+      const expressions = detection.expressions || {};
+      const mainExpression = Object.entries(expressions)
+        .sort((a, b) => b[1] - a[1])[0];
+
+      const faceData = {
+        id: Date.now().toString(),
+        label,
+        timestamp: new Date().toISOString(),
+        confidence: detection.detection.score,
+        expression: mainExpression ? mainExpression[0] : 'unknown',
+        expressionScores: expressions,
+        image: imageData,
+        box: { x: box.x, y: box.y, width: box.width, height: box.height }
+      };
+
+      if (saveLandmarks.checked && detection.landmarks) {
+        faceData.landmarks = detection.landmarks.positions;
+      }
+
+      dataset.push(faceData);
+      saveDataset();
+      savedFacesCount = dataset.length;
+      savedCount.textContent = savedFacesCount;
+
+      facePreviewImg.src = imageData;
+      facePreview.style.display = 'block';
+      setTimeout(() => {
+        facePreview.style.display = 'none';
+      }, 2000);
+
+      showNotification(`Wajah "${label}" disimpan!`);
+      updateDatasetView();
+    }
+
+    async function detectFrame() {
+      if (!isRunning) return;
+
+      const detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceExpressions();
+
+      drawDetections(detections);
+
+      if (autoSaveToggle.checked && detections.length > 0) {
+        const now = Date.now();
+        const interval = parseInt(autoSaveInterval.value);
+        if (now - lastAutoSave >= interval) {
+          const label = personLabel.value || `Person_${Math.floor(Math.random() * 1000)}`;
+          personLabel.value = label;
+          captureFace(detections[0]);
+          lastAutoSave = now;
+        }
+      }
+
+      frameCount++;
+      const currentTime = performance.now();
+      if (currentTime - lastTime >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastTime = currentTime;
+        fpsCounter.textContent = `FPS: ${fps}`;
+      }
+
+      animationId = requestAnimationFrame(detectFrame);
+    }
+
+    function updateDatasetView() {
+      totalFaces.textContent = dataset.length;
+      const persons = new Set(dataset.map(d => d.label));
+      totalPersons.textContent = persons.size;
+
+      const totalSize = new Blob([JSON.stringify(dataset)]).size;
+      storageUsed.textContent = totalSize > 1024 * 1024
+        ? (totalSize / (1024 * 1024)).toFixed(1) + ' MB'
+        : (totalSize / 1024).toFixed(1) + ' KB';
+
+      if (dataset.length === 0) {
+        datasetGrid.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+            </svg>
+            <p>Belum ada data wajah</p>
+            <p style="font-size: 0.8rem;">Mulai deteksi dan simpan wajah untuk membuat dataset</p>
+          </div>
+        `;
+        return;
+      }
+
+      const searchTerm = searchInput.value.toLowerCase();
+      const sortBy = sortSelect.value;
+
+      let filtered = dataset.filter(d => d.label.toLowerCase().includes(searchTerm));
+
+      filtered.sort((a, b) => {
+        switch (sortBy) {
+          case 'newest': return new Date(b.timestamp) - new Date(a.timestamp);
+          case 'oldest': return new Date(a.timestamp) - new Date(b.timestamp);
+          case 'name': return a.label.localeCompare(b.label);
+          default: return 0;
+        }
+      });
+
+      datasetGrid.innerHTML = filtered.map(face => `
+        <div class="face-card">
+          <img src="${face.image}" alt="${face.label}">
+          <div class="face-card-info">
+            <h4>${face.label}</h4>
+            <p>${new Date(face.timestamp).toLocaleString('id-ID')}</p>
+            <p>Confidence: ${(face.confidence * 100).toFixed(1)}%</p>
+            <p>Expression: ${face.expression}</p>
+          </div>
+          <div class="face-card-actions">
+            <button class="btn-download" onclick="downloadFace('${face.id}')">Download</button>
+            <button class="btn-delete" onclick="deleteFace('${face.id}')">Hapus</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.downloadFace = function(id) {
+      const face = dataset.find(d => d.id === id);
+      if (!face) return;
+
+      const link = document.createElement('a');
+      link.download = `face_${face.label}_${face.id}.jpg`;
+      link.href = face.image;
+      link.click();
+
+      const metadata = { ...face };
+      delete metadata.image;
+      const metaBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+      const metaLink = document.createElement('a');
+      metaLink.download = `face_${face.label}_${face.id}.json`;
+      metaLink.href = URL.createObjectURL(metaBlob);
+      metaLink.click();
+    };
+
+    window.deleteFace = function(id) {
+      dataset = dataset.filter(d => d.id !== id);
+      saveDataset();
+      savedFacesCount = dataset.length;
+      savedCount.textContent = savedFacesCount;
+      updateDatasetView();
+      showNotification('Data wajah dihapus');
+    };
+
+    function exportDataset() {
+      if (dataset.length === 0) {
+        showNotification('Tidak ada data untuk diexport', 'error');
+        return;
+      }
+
+      const exportData = {
+        version: '1.0',
+        exportDate: new Date().toISOString(),
+        totalFaces: dataset.length,
+        faces: dataset.map(d => {
+          const { image, ...meta } = d;
+          return meta;
+        })
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.download = `face_dataset_${Date.now()}.json`;
+      link.href = URL.createObjectURL(blob);
+      link.click();
+
+      showNotification(`Dataset exported: ${dataset.length} wajah`);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        await startCamera();
+        isRunning = true;
+        statusIndicator.classList.add('active');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        detectFrame();
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    });
+
+    stopBtn.addEventListener('click', () => {
+      isRunning = false;
+      statusIndicator.classList.remove('active');
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      stopCamera();
+      faceCount.textContent = '0';
+      detectionList.innerHTML = '<p style="color: #666; font-size: 0.8rem; text-align: center;">Belum ada wajah terdeteksi</p>';
+      fpsCounter.textContent = 'FPS: --';
+    });
+
+    captureBtn.addEventListener('click', async () => {
+      const detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320 }))
+        .withFaceLandmarks()
+        .withFaceExpressions();
+
+      if (detections.length > 0) {
+        captureFace(detections[0]);
+      } else {
+        showNotification('Tidak ada wajah terdeteksi!', 'error');
+      }
+    });
+
+    exportBtn.addEventListener('click', exportDataset);
+
+    clearAllBtn.addEventListener('click', () => {
+      if (confirm('Hapus semua data wajah?')) {
+        dataset = [];
+        saveDataset();
+        savedFacesCount = 0;
+        savedCount.textContent = '0';
+        updateDatasetView();
+        showNotification('Semua data dihapus');
+      }
+    });
+
+    searchInput.addEventListener('input', updateDatasetView);
+    sortSelect.addEventListener('change', updateDatasetView);
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.dataset-view').forEach(v => v.classList.remove('active'));
+
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
+
+        if (tab.dataset.tab === 'dataset') {
+          updateDatasetView();
+        }
+      });
+    });
+
+    loadDataset();
+    loadModels();
+  </script>
+</body>
+</html>

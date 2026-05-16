@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Vision - All-in-One</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; }
+    .container { max-width: 800px; margin: 0 auto; padding: 15px; }
+    h1 { text-align: center; padding: 15px 0; font-size: 1.3rem; background: linear-gradient(90deg, #00d4ff, #7b2cbf); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .load-status { text-align: center; padding: 8px; font-size: 0.8rem; color: #888; }
+    .load-status .done { color: #00ff88; }
+    .load-status .fail { color: #ff4444; }
+    .video-wrap { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
+    video { width: 100%; height: auto; display: block; }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+    .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); z-index: 10; flex-direction: column; gap: 10px; }
+    .overlay.hidden { display: none; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #00d4ff; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .controls { display: flex; gap: 8px; margin-top: 15px; }
+    .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+    .btn-start { background: linear-gradient(135deg, #00d4ff, #7b2cbf); color: #fff; }
+    .btn-stop { background: #ff4444; color: #fff; }
+    .btn-capture { background: #00ff88; color: #000; }
+    .btn-switch { background: #ffcc00; color: #000; min-width: 50px; flex: 0; }
+    .btn-export { background: #888; color: #fff; }
+    .info { margin-top: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 12px; }
+    .info h3 { font-size: 0.85rem; color: #00d4ff; margin-bottom: 8px; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .stat { background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; text-align: center; }
+    .stat .val { font-size: 1.3rem; font-weight: bold; color: #00d4ff; }
+    .stat .lbl { font-size: 0.7rem; color: #888; }
+    .list { max-height: 200px; overflow-y: auto; margin-top: 8px; }
+    .item { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 4px; font-size: 0.8rem; }
+    .item .conf { color: #00ff88; }
+    .item .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .face-input { margin-top: 10px; }
+    .face-input input { width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; margin-bottom: 8px; }
+    .checkbox { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 0.85rem; }
+    .dataset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 15px; }
+    .face-card { background: rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; }
+    .face-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+    .face-card .info { padding: 6px; }
+    .face-card .info h4 { font-size: 0.75rem; color: #00d4ff; }
+    .face-card .info p { font-size: 0.65rem; color: #888; }
+    .face-card .actions { display: flex; gap: 4px; padding: 0 6px 6px; }
+    .face-card .actions button { flex: 1; padding: 4px; border: none; border-radius: 3px; font-size: 0.65rem; cursor: pointer; }
+    .dl-btn { background: #00d4ff; }
+    .del-btn { background: #ff4444; color: #fff; }
+    .notif { position: fixed; top: 10px; right: 10px; background: #00ff88; color: #000; padding: 8px 15px; border-radius: 6px; font-weight: 600; z-index: 999; transform: translateX(200px); transition: transform 0.3s; }
+    .notif.show { transform: translateX(0); }
+    .notif.err { background: #ff4444; color: #fff; }
+    .joystick-area { position: relative; width: 100%; height: 180px; margin-top: 15px; background: rgba(0,0,0,0.5); border-radius: 12px; border: 2px solid rgba(0,212,255,0.3); touch-action: none; }
+    .joystick-base { position: absolute; top: 50%; left: 50%; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); transform: translate(-50%, -50%); }
+    .joystick-stick { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #00d4ff, #7b2cbf); transform: translate(-50%, -50%); box-shadow: 0 0 15px rgba(0,212,255,0.5); pointer-events: none; }
+    .joystick-info { position: absolute; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 0.8rem; color: #00d4ff; }
+    .tracking-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ff4444; margin-right: 5px; }
+    .tracking-indicator.active { background: #00ff88; box-shadow: 0 0 8px #00ff88; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.5} }
+    .mode-row { display: flex; gap: 8px; margin-bottom: 15px; }
+    .mode-btn { flex: 1; padding: 8px; text-align: center; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+    .mode-btn.active { background: linear-gradient(135deg, #00d4ff, #7b2cbf); border-color: transparent; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AI Vision - All-in-One</h1>
+    <div id="loadStatus" class="load-status">Memuat...</div>
+
+    <div class="mode-row">
+      <div class="mode-btn active" data-m="detect">Deteksi</div>
+      <div class="mode-btn" data-m="faces">Dataset Wajah</div>
+    </div>
+
+    <div id="detectMode">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="overlay" id="overlay"><div class="spinner"></div><p id="statusText">Memuat model...</p></div>
+      </div>
+      <div class="controls">
+        <button class="btn btn-start" id="startBtn">Mulai</button>
+        <button class="btn btn-stop" id="stopBtn" disabled>Stop</button>
+        <button class="btn btn-switch" id="switchBtn">🔄</button>
+      </div>
+      <div class="info">
+        <div class="stats">
+          <div class="stat"><div class="val" id="objCount">0</div><div class="lbl">Objek</div></div>
+          <div class="stat"><div class="val" id="faceCount">0</div><div class="lbl">Wajah</div></div>
+          <div class="stat"><div class="val" id="savedCount">0</div><div class="lbl">Dataset</div></div>
+        </div>
+        <div class="face-input" style="margin-top:10px;">
+          <input type="text" id="personLabel" placeholder="Label nama wajah (opsional)">
+          <div class="checkbox"><input type="checkbox" id="autoSave"><label>Auto-save wajah tiap 3 detik</label></div>
+        </div>
+        <div class="controls" style="margin-top:8px;">
+          <button class="btn btn-capture" id="captureBtn">Capture Wajah</button>
+          <button class="btn btn-export" id="exportBtn">Export</button>
+        </div>
+        <div class="list" id="detList"></div>
+        <div class="joystick-area" id="joystickArea">
+          <div class="joystick-base"><div class="joystick-stick" id="joystickStick"></div></div>
+          <div class="joystick-info"><span class="tracking-indicator" id="trackingDot"></span><span id="trackingText">No target</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="facesMode" style="display:none;">
+      <div class="stats">
+        <div class="stat"><div class="val" id="totalFaces">0</div><div class="lbl">Total</div></div>
+        <div class="stat"><div class="val" id="totalPersons">0</div><div class="lbl">Orang</div></div>
+      </div>
+      <div class="controls" style="margin-top:10px;">
+        <button class="btn btn-stop" id="clearAll">Hapus Semua</button>
+      </div>
+      <div class="dataset-grid" id="datasetGrid"></div>
+    </div>
+
+    <div style="text-align:center;margin-top:15px;"><button id="debugToggle" style="background:none;border:1px solid #333;color:#666;padding:5px 15px;border-radius:4px;cursor:pointer;font-size:0.75rem;">Debug ▼</button></div>
+    <div id="debug" style="display:none;background:#111;border-radius:8px;padding:10px;font-family:monospace;font-size:0.7rem;color:#888;max-height:150px;overflow-y:auto;margin-top:10px;">
+      <style>#debug .ok{color:#00ff88}#debug .err{color:#ff4444}#debug .warn{color:#ffcc00}</style>
+    </div>
+  </div>
+
+  <div class="notif" id="notif"></div>
+
+  <script>
+    // UI handlers first
+    document.querySelectorAll('.mode-btn').forEach(function(t) {
+      t.onclick = function() {
+        document.querySelectorAll('.mode-btn').forEach(function(x){x.classList.remove('active');});
+        document.getElementById('detectMode').style.display = 'none';
+        document.getElementById('facesMode').style.display = 'none';
+        t.classList.add('active');
+        document.getElementById(t.dataset.m === 'detect' ? 'detectMode' : 'facesMode').style.display = 'block';
+      };
+    });
+
+    document.getElementById('debugToggle').onclick = function() {
+      var d = document.getElementById('debug');
+      d.style.display = d.style.display === 'none' ? 'block' : 'none';
+    };
+
+    function log(msg, cls) {
+      var dbg = document.getElementById('debug');
+      var d = document.createElement('div');
+      d.className = cls || '';
+      d.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      dbg.appendChild(d); dbg.scrollTop = dbg.scrollHeight;
+    }
+
+    function notify(msg, err) {
+      var n = document.getElementById('notif');
+      n.textContent = msg; n.className = 'notif show' + (err ? ' err' : '');
+      setTimeout(function() { n.classList.remove('show'); }, 3000);
+    }
+
+    // State
+    var cocoModel = null, faceLoaded = false;
+    var stream = null, running = false;
+    var facing = 'environment';
+    var dataset = [], lastAutoSave = 0;
+    var joystickX = 0, joystickY = 0;
+    var initDone = {coco: false, face: false};
+    var loadStatus = document.getElementById('loadStatus');
+
+    function checkReady() {
+      if (initDone.coco && initDone.face) loadStatus.innerHTML = '<span class="done">Semua siap ✓</span>';
+      else if (initDone.coco) loadStatus.innerHTML = 'Loading face model...';
+      else if (initDone.face) loadStatus.innerHTML = 'Loading object model...';
+    }
+
+    function loadSaved() {
+      try { var s = localStorage.getItem('faceDataset'); if (s) dataset = JSON.parse(s); } catch(e) {}
+      document.getElementById('savedCount').textContent = dataset.length;
+      renderDataset();
+    }
+    function saveSaved() {
+      try { localStorage.setItem('faceDataset', JSON.stringify(dataset)); } catch(e) { notify('Storage penuh!', true); }
+    }
+
+    log('Secure: ' + (window.isSecureContext ? 'YES' : 'NO'));
+    log('Hostname: ' + location.hostname);
+
+    // Load COCO-SSD
+    try {
+      log('Loading TF.js...');
+      var tfScript = document.createElement('script');
+      tfScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js';
+      tfScript.onload = function() {
+        log('TF.js ✓', 'ok');
+        var cocoScript = document.createElement('script');
+        cocoScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
+        cocoScript.onload = function() {
+          log('coco-ssd ✓', 'ok');
+          tf.ready().then(function() { return cocoSsd.load(); }).then(function(m) {
+            cocoModel = m; log('COCO-SSD ✓', 'ok'); initDone.coco = true; checkReady();
+          }).catch(function(e) { log('COCO err: '+e.message, 'err'); initDone.coco = true; checkReady(); });
+        };
+        cocoScript.onerror = function() { log('COCO CDN fail', 'err'); initDone.coco = true; checkReady(); };
+        document.head.appendChild(cocoScript);
+      };
+      tfScript.onerror = function() { log('TF.js CDN fail', 'err'); initDone.coco = true; checkReady(); };
+      document.head.appendChild(tfScript);
+    } catch(e) { log('COCO err: '+e.message, 'err'); initDone.coco = true; checkReady(); }
+
+    // Load face-api
+    try {
+      log('Loading face-api...');
+      var faceScript = document.createElement('script');
+      faceScript.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.min.js';
+      faceScript.onload = function() {
+        log('face-api ✓', 'ok');
+        var URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
+        faceapi.nets.tinyFaceDetector.loadFromUri(URL).then(function() {
+          log('tinyFaceDetector ✓', 'ok');
+          return faceapi.nets.faceLandmark68Net.loadFromUri(URL);
+        }).then(function() {
+          log('landmarks ✓', 'ok');
+          return faceapi.nets.faceExpressionNet.loadFromUri(URL);
+        }).then(function() {
+          log('expressions ✓', 'ok');
+          faceLoaded = true; initDone.face = true; checkReady();
+        }).catch(function(e) { log('Face err: '+e.message, 'err'); initDone.face = true; checkReady(); });
+      };
+      faceScript.onerror = function() { log('face-api CDN fail', 'err'); initDone.face = true; checkReady(); };
+      document.head.appendChild(faceScript);
+    } catch(e) { log('Face err: '+e.message, 'err'); initDone.face = true; checkReady(); }
+
+    // Camera
+    async function startCam() {
+      var video = document.getElementById('video');
+      var s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      video.srcObject = s;
+      return new Promise(function(resolve) {
+        video.onloadedmetadata = function() {
+          var c = document.getElementById('canvas');
+          c.width = video.videoWidth; c.height = video.videoHeight;
+          resolve(s);
+        };
+      });
+    }
+
+    // Detection loop - simple and reliable
+    var lastObjs = [], lastFaces = [];
+    var detecting = false;
+
+    async function runDetection() {
+      if (detecting || !running) return;
+      detecting = true;
+      var video = document.getElementById('video');
+      if (video.readyState < 2) { detecting = false; return; }
+
+      try {
+        var objPromise = cocoModel ? cocoModel.detect(video).catch(function(e){log('obj err:'+e.message,'err');return [];}) : Promise.resolve([]);
+        var facePromise = faceLoaded ? (async function() {
+          try {
+            var det = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.2}));
+            if (typeof det.withFaceLandmarks === 'function') {
+              var withLandmarks = await det.withFaceLandmarks();
+              if (typeof withLandmarks.withFaceExpressions === 'function') {
+                var expResult = withLandmarks.withFaceExpressions();
+                if (expResult && typeof expResult.then === 'function') return await expResult;
+                return expResult;
+              }
+              return withLandmarks;
+            }
+            return await det;
+          } catch(e) {
+            log('face err:'+e.message,'err');
+            return [];
+          }
+        })() : Promise.resolve([]);
+
+        var results = await Promise.all([objPromise, facePromise]);
+        lastObjs = results[0];
+        lastFaces = results[1];
+        if (lastObjs.length > 0) log('Objects: '+lastObjs.length, 'ok');
+        if (lastFaces.length > 0) log('Faces: '+lastFaces.length, 'ok');
+      } catch(e) { log('Detect err: '+e.message, 'err'); }
+      detecting = false;
+    }
+
+    function drawFrame() {
+      if (!running) return;
+      var video = document.getElementById('video');
+      var canvas = document.getElementById('canvas');
+      var ctx = canvas.getContext('2d');
+
+      // Set canvas dimensions if not set yet
+      if (video.videoWidth > 0 && canvas.width === 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.style.width = video.clientWidth + 'px';
+        canvas.style.height = video.clientHeight + 'px';
+        log('Canvas init: '+canvas.width+'x'+canvas.height, 'ok');
+      }
+
+      if (canvas.width === 0) { requestAnimationFrame(drawFrame); return; }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // TEST: red box if no detections yet
+      if (lastObjs.length === 0 && lastFaces.length === 0) {
+        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 4;
+        ctx.strokeRect(30, 30, 80, 80);
+        ctx.fillStyle = '#ff0000'; ctx.font = '16px sans-serif';
+        ctx.fillText('Canvas OK - waiting for detections...', 40, 140);
+      }
+
+      // Draw objects
+      var COLORS = {person:'#ff4444',car:'#ffcc00',bicycle:'#ff8800',motorcycle:'#88ff00',bottle:'#ffaa00',cup:'#00ffaa',chair:'#00ff55',tv:'#00ff55',laptop:'#5500ff',cell_phone:'#ff0055'};
+      lastObjs.forEach(function(p) {
+        var x=p.bbox[0], y=p.bbox[1], w=p.bbox[2], h=p.bbox[3];
+        var col = COLORS[p.class] || '#00d4ff';
+        ctx.strokeStyle = col; ctx.lineWidth = p.class==='person' ? 4 : 2;
+        ctx.strokeRect(x, y, w, h);
+        var lbl = p.class + ' ' + (p.score*100).toFixed(0) + '%';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = col; ctx.fillRect(x, y-18, ctx.measureText(lbl).width+8, 18);
+        ctx.fillStyle = '#000'; ctx.fillText(lbl, x+4, y-4);
+      });
+
+      // Draw faces
+      var currentLabel = document.getElementById('personLabel').value || '';
+      lastFaces.forEach(function(d, i) {
+        if (!d.detection) return;
+        var b = d.detection.box;
+        var exp = d.expressions || {};
+        var main = Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0];
+        var lbl = (currentLabel ? currentLabel : 'Face') + ' ' + (main?main[0]:'') + ' ' + (main?(main[1]*100).toFixed(0):'') + '%';
+        ctx.strokeStyle = currentLabel ? '#00ff88' : '#00d4ff'; ctx.lineWidth = 3;
+        ctx.strokeRect(b.x, b.y, b.width, b.height);
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = currentLabel ? '#00ff88' : '#00d4ff'; ctx.fillRect(b.x, b.y-18, ctx.measureText(lbl).width+8, 18);
+        ctx.fillStyle = '#000'; ctx.fillText(lbl, b.x+4, b.y-4);
+      });
+
+      // Update counts
+      document.getElementById('objCount').textContent = lastObjs.length;
+      document.getElementById('faceCount').textContent = lastFaces.length;
+
+      // Update list
+      var items = [];
+      lastObjs.forEach(function(p) { items.push({label:p.class, conf:p.score, type:'obj'}); });
+      lastFaces.forEach(function(d) { var exp=d.expressions||{}; var main=Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0]; items.push({label:(currentLabel||'Face')+' '+ (main?main[0]:''), conf:d.detection.score, type:'face'}); });
+      document.getElementById('detList').innerHTML = items.map(function(it) {
+        return '<div class="item"><span><span class="dot" style="background:'+(it.type==='face'?'#00d4ff':'#ff4444')+'"></span>'+it.label+'</span><span class="conf">'+(it.conf*100).toFixed(0)+'%</span></div>';
+      }).join('') || '';
+
+      // Joystick
+      var cw = canvas.width || 1, ch = canvas.height || 1;
+      var target = lastFaces.length > 0 ? {x:lastFaces[0].detection.box.x+lastFaces[0].detection.box.width/2, y:lastFaces[0].detection.box.y+lastFaces[0].detection.box.height/2} :
+                   lastObjs.filter(function(p){return p.class==='person';}).length > 0 ? {x:lastObjs[0].bbox[0]+lastObjs[0].bbox[2]/2, y:lastObjs[0].bbox[1]+lastObjs[0].bbox[3]/2} : null;
+      if (target) {
+        var tx = (target.x/cw - 0.5) * 2, ty = (target.y/ch - 0.5) * 2;
+        joystickX = joystickX * 0.7 + tx * 0.3;
+        joystickY = joystickY * 0.7 + ty * 0.3;
+        document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
+        document.getElementById('trackingDot').classList.add('active');
+        document.getElementById('trackingText').textContent = 'Tracking';
+      } else {
+        joystickX *= 0.8; joystickY *= 0.8;
+        document.getElementById('joystickStick').style.transform = 'translate(calc(-50% + '+joystickX*35+'px), calc(-50% + '+joystickY*35+'px))';
+        document.getElementById('trackingDot').classList.remove('active');
+        document.getElementById('trackingText').textContent = 'No target';
+      }
+
+      // Auto-save
+      if (document.getElementById('autoSave').checked && lastFaces.length > 0) {
+        var now = Date.now();
+        if (now - lastAutoSave >= 3000) { captureFace(lastFaces[0]); lastAutoSave = now; }
+      }
+
+      requestAnimationFrame(drawFrame);
+    }
+
+    // Detection timer
+    var detectTimerId = null;
+    function detectTimer() {
+      if (!running) return;
+      runDetection();
+      detectTimerId = setTimeout(detectTimer, 200);
+    }
+
+    function captureFace(det) {
+      var video = document.getElementById('video');
+      var b = det.detection.box, pad = 20;
+      var fc = document.createElement('canvas');
+      fc.width = b.width+pad*2; fc.height = b.height+pad*2;
+      fc.getContext('2d').drawImage(video, b.x-pad, b.y-pad, b.width+pad*2, b.height+pad*2, 0, 0, fc.width, fc.height);
+      var img = fc.toDataURL('image/jpeg', 0.8);
+      var label = document.getElementById('personLabel').value || 'Unknown_' + Date.now().toString().slice(-6);
+      var exp = det.expressions || {};
+      var main = Object.entries(exp).sort(function(a,b){return b[1]-a[1];})[0];
+      dataset.push({ id: Date.now().toString(), label, time: new Date().toISOString(), conf: det.detection.score, exp: main?main[0]:'?', image: img });
+      saveSaved(); document.getElementById('savedCount').textContent = dataset.length;
+      notify('Wajah "'+label+'" disimpan!'); renderDataset();
+    }
+
+    function renderDataset() {
+      document.getElementById('totalFaces').textContent = dataset.length;
+      document.getElementById('totalPersons').textContent = new Set(dataset.map(function(d){return d.label;})).size;
+      var grid = document.getElementById('datasetGrid');
+      if (dataset.length === 0) { grid.innerHTML = '<p style="color:#666;text-align:center;padding:30px;">Belum ada data</p>'; return; }
+      grid.innerHTML = dataset.map(function(f) {
+        return '<div class="face-card"><img src="'+f.image+'" alt="'+f.label+'"><div class="info"><h4>'+f.label+'</h4><p>'+f.exp+' '+(f.conf*100).toFixed(0)+'%</p></div><div class="actions"><button class="dl-btn" onclick="dlFace(\''+f.id+'\')">DL</button><button class="del-btn" onclick="delFace(\''+f.id+'\')">X</button></div></div>';
+      }).join('');
+    }
+    window.dlFace = function(id) { var f=dataset.find(function(d){return d.id===id;}); if(!f)return; var a=document.createElement('a'); a.download='face_'+f.label+'.jpg'; a.href=f.image; a.click(); };
+    window.delFace = function(id) { dataset=dataset.filter(function(d){return d.id!==id;}); saveSaved(); document.getElementById('savedCount').textContent=dataset.length; renderDataset(); notify('Dihapus'); };
+
+    // Buttons
+    document.getElementById('startBtn').onclick = async function() {
+      if (!cocoModel && !faceLoaded) { notify('Model belum siap, tunggu...', true); return; }
+      try {
+        document.getElementById('statusText').textContent = 'Buka kamera...';
+        stream = await startCam(); running = true;
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        drawFrame();
+        detectTimer();
+      } catch(e) { document.getElementById('statusText').textContent = 'Error: ' + e.message; }
+    };
+
+    document.getElementById('stopBtn').onclick = function() {
+      running = false; if(detectTimerId) clearTimeout(detectTimerId);
+      if(stream) stream.getTracks().forEach(function(t){t.stop();});
+      document.getElementById('video').srcObject = null;
+      document.getElementById('overlay').classList.remove('hidden');
+      document.getElementById('statusText').textContent = 'Siap!';
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      document.getElementById('objCount').textContent = '0';
+      document.getElementById('faceCount').textContent = '0';
+      document.getElementById('detList').innerHTML = '';
+      lastObjs = []; lastFaces = [];
+      joystickX=0; joystickY=0;
+      document.getElementById('joystickStick').style.transform = 'translate(-50%, -50%)';
+      document.getElementById('trackingDot').classList.remove('active');
+      document.getElementById('trackingText').textContent = 'No target';
+    };
+
+    document.getElementById('switchBtn').onclick = async function() {
+      if (!running) return;
+      facing = facing === 'user' ? 'environment' : 'user';
+      running = false; if(detectTimerId) clearTimeout(detectTimerId);
+      if(stream) stream.getTracks().forEach(function(t){t.stop();});
+      stream = await startCam(); running = true;
+      drawFrame();
+      detectTimer();
+    };
+
+    document.getElementById('captureBtn').onclick = async function() {
+      if (!faceLoaded) { notify('Model wajah belum siap', true); return; }
+      try {
+        var det = faceapi.detectAllFaces(document.getElementById('video'), new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.2}));
+        var faces;
+        if (typeof det.withFaceLandmarks === 'function') {
+          var withLandmarks = det.withFaceLandmarks();
+          if (typeof withLandmarks.withFaceExpressions === 'function') {
+            faces = await withLandmarks.withFaceExpressions();
+          } else {
+            faces = await withLandmarks;
+          }
+        } else {
+          faces = await det;
+        }
+        if (faces.length > 0) captureFace(faces[0]); else notify('Tidak ada wajah!', true);
+      } catch(e) { notify('Error: '+e.message, true); }
+    };
+
+    document.getElementById('exportBtn').onclick = function() {
+      if (dataset.length===0) { notify('Kosong!',true); return; }
+      var blob=new Blob([JSON.stringify({faces:dataset.map(function(d){var m=Object.assign({},d);delete m.image;return m;})},null,2)],{type:'application/json'});
+      var a=document.createElement('a'); a.download='faces_'+Date.now()+'.json'; a.href=URL.createObjectURL(blob); a.click();
+      notify('Exported '+dataset.length+' wajah');
+    };
+
+    document.getElementById('clearAll').onclick = function() { if(confirm('Hapus semua?')){ dataset=[]; saveSaved(); document.getElementById('savedCount').textContent='0'; renderDataset(); notify('Dihapus'); } };
+
+    loadSaved();
+  </script>
+</body>
+</html>
